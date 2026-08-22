@@ -81,32 +81,98 @@
     gap: .8rem;
   }
   .card {
+    display: block;
+    width: 100%;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: .7rem;
     overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+    font: inherit;
+    color: inherit;
   }
   .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #000; }
   .card .info { padding: .5rem .6rem; }
   .card .name { font-size: .85rem; font-weight: 600; margin: 0 0 .25rem; }
   .card .tags { font-size: .72rem; color: var(--muted); }
+  .card .meta { font-size: .72rem; color: var(--accent); margin: .25rem 0 0; font-weight: 600; }
+  #program { display: flex; flex-direction: column; gap: 1.2rem; }
+  .day h3 { margin: 0 0 .5rem; font-size: .95rem; }
+  .day .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: .8rem;
+  }
+  #modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 10;
+  }
+  #modal-overlay.hidden { display: none; }
+  #modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: .9rem;
+    max-width: 480px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 1.25rem;
+    position: relative;
+  }
+  #modal-close {
+    position: absolute;
+    top: .75rem;
+    right: .75rem;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: .25rem .5rem;
+  }
+  #modal img { width: 100%; border-radius: .6rem; background: #000; margin-bottom: .8rem; }
+  #modal h2 { margin: 0 0 .25rem; font-size: 1.05rem; }
+  #modal .tags { color: var(--muted); font-size: .8rem; margin: 0 0 .8rem; }
+  #modal select { margin-bottom: .8rem; }
+  #modal ol { margin: 0; padding-left: 1.2rem; line-height: 1.5; }
+  #modal ol li { margin-bottom: .4rem; }
 </style>
 </head>
 <body>
 <header>
   <h1>🏋️ Sélecteur d'exercices IA</h1>
-  <p>Décris ce que tu veux travailler (matériel disponible, muscles, objectif) — l'assistant filtre les 1 324 exercices du dataset pour toi.</p>
+  <p>Décris ce que tu veux travailler (matériel, muscles, objectif) ou demande un programme sur plusieurs jours — l'assistant filtre les 1 324 exercices du dataset pour toi. Clique sur un exercice pour voir les consignes.</p>
   <span id="mode-badge"></span>
 </header>
 <main>
   <div id="log"></div>
   <div id="results"></div>
+  <div id="program"></div>
   <form id="chat-form">
     <select id="lang"></select>
-    <input id="message" type="text" placeholder="Ex : haut du corps avec haltères, 6 exercices" autocomplete="off" />
+    <input id="message" type="text" placeholder="Ex : programme sur 3 jours avec haltères" autocomplete="off" />
     <button type="submit">Envoyer</button>
   </form>
 </main>
+<div id="modal-overlay" class="hidden">
+  <div id="modal">
+    <button id="modal-close" aria-label="Fermer">&times;</button>
+    <img id="modal-img" alt="" />
+    <h2 id="modal-name"></h2>
+    <p class="tags" id="modal-tags"></p>
+    <select id="modal-lang"></select>
+    <ol id="modal-steps"></ol>
+  </div>
+</div>
 <script>
   const log = document.getElementById("log");
   const results = document.getElementById("results");
@@ -143,6 +209,10 @@
     }
   })();
 
+  const programEl = document.getElementById("program");
+  const exerciseCache = new Map(); // id -> { lang, data }
+  let allLangsPromise = null;
+
   function addBubble(role, text) {
     const div = document.createElement("div");
     div.className = "msg " + role;
@@ -152,20 +222,132 @@
     return div;
   }
 
-  function renderResults(exercises) {
+  function cacheExercise(ex, lang) {
+    exerciseCache.set(ex.id, { lang, data: ex });
+  }
+
+  function makeCard(ex, lang, meta) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card";
+    card.innerHTML = `
+      <img src="${ex.gif_url}" alt="${ex.name}" loading="lazy" />
+      <div class="info">
+        <p class="name">${ex.name}</p>
+        <p class="tags">${ex.equipment} · ${ex.category} · ${ex.target}</p>
+        ${meta ? `<p class="meta">${meta}</p>` : ""}
+      </div>`;
+    card.addEventListener("click", () => {
+      cacheExercise(ex, lang);
+      openModal(ex.id);
+    });
+    return card;
+  }
+
+  function renderResults(exercises, lang) {
     results.innerHTML = "";
     for (const ex of exercises) {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <img src="${ex.gif_url}" alt="${ex.name}" loading="lazy" />
-        <div class="info">
-          <p class="name">${ex.name}</p>
-          <p class="tags">${ex.equipment} · ${ex.category} · ${ex.target}</p>
-        </div>`;
-      results.appendChild(card);
+      cacheExercise(ex, lang);
+      results.appendChild(makeCard(ex, lang, null));
     }
   }
+
+  function renderProgram(program, lang) {
+    programEl.innerHTML = "";
+    const restLabel = lang === "fr" ? "repos" : "rest";
+    for (const day of program.days) {
+      const section = document.createElement("div");
+      section.className = "day";
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const item of day.exercises) {
+        const meta = `${item.sets} × ${item.reps} · ${restLabel} ${item.rest_seconds}s`;
+        grid.appendChild(makeCard(item.exercise, lang, meta));
+      }
+      const h3 = document.createElement("h3");
+      h3.textContent = day.label;
+      section.appendChild(h3);
+      section.appendChild(grid);
+      programEl.appendChild(section);
+    }
+  }
+
+  function renderSteps(exercise) {
+    const stepsEl = document.getElementById("modal-steps");
+    stepsEl.innerHTML = "";
+    const steps = Array.isArray(exercise.instruction_steps) && exercise.instruction_steps.length
+      ? exercise.instruction_steps
+      : [exercise.instructions];
+    for (const step of steps) {
+      const li = document.createElement("li");
+      li.textContent = step;
+      stepsEl.appendChild(li);
+    }
+  }
+
+  function fillModal(exercise) {
+    document.getElementById("modal-img").src = exercise.gif_url;
+    document.getElementById("modal-img").alt = exercise.name;
+    document.getElementById("modal-name").textContent = exercise.name;
+    document.getElementById("modal-tags").textContent =
+      `${exercise.equipment} · ${exercise.category} · ${exercise.target}`;
+    renderSteps(exercise);
+  }
+
+  async function loadAllLangs() {
+    if (!allLangsPromise) {
+      allLangsPromise = fetch("/api/languages").then((r) => r.json());
+    }
+    return allLangsPromise;
+  }
+
+  async function openModal(id) {
+    const cached = exerciseCache.get(id);
+    if (!cached) return;
+    fillModal(cached.data);
+
+    const modalLang = document.getElementById("modal-lang");
+    if (!modalLang.dataset.loaded) {
+      const langs = await loadAllLangs();
+      modalLang.innerHTML = "";
+      for (const lang of langs) {
+        const opt = document.createElement("option");
+        opt.value = lang;
+        opt.textContent = lang.toUpperCase();
+        modalLang.appendChild(opt);
+      }
+      modalLang.dataset.loaded = "1";
+    }
+    modalLang.value = cached.lang;
+    modalLang.onchange = async () => {
+      const newLang = modalLang.value;
+      const already = exerciseCache.get(id);
+      if (already && already.lang === newLang) return;
+      try {
+        const res = await fetch(`/api/exercise/${id}?lang=${newLang}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const exercise = await res.json();
+        cacheExercise(exercise, newLang);
+        fillModal(exercise);
+      } catch (err) {
+        // keep showing the previous language rather than a broken modal
+      }
+    };
+
+    document.getElementById("modal-overlay").classList.remove("hidden");
+  }
+
+  function closeModal() {
+    document.getElementById("modal-overlay").classList.add("hidden");
+  }
+
+  document.getElementById("modal-close").addEventListener("click", closeModal);
+  document.getElementById("modal-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "modal-overlay") closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
+  });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -186,7 +368,13 @@
       const data = await res.json();
       pending.textContent = data.message;
       pending.className = "msg assistant";
-      renderResults(data.exercises || []);
+      results.innerHTML = "";
+      programEl.innerHTML = "";
+      if (data.program && data.program.days && data.program.days.length) {
+        renderProgram(data.program, langSelect.value);
+      } else {
+        renderResults(data.exercises || [], langSelect.value);
+      }
       history.push({ role: "user", text: message });
       history.push({ role: "assistant", text: data.message });
     } catch (err) {
