@@ -253,12 +253,21 @@
 
   let currentExercises = [];
   let currentProgram = null;
+  // scope key ("results" or "day-N") -> mid-swap. Blocks a second swap in
+  // the same grid/day from starting until the first has fully resolved and
+  // re-rendered, so two concurrent requests can never both pick the same
+  // replacement (each fetch's `exclude` list is also recomputed live from
+  // current state at click time, not a snapshot from when the grid was
+  // last rendered).
+  const swappingScopes = new Set();
 
-  // siblingIds: every exercise id shown alongside this one (same grid/day),
-  // sent as `exclude` so swapping never introduces a duplicate. onSwap
-  // receives the replacement exercise and is responsible for updating
-  // state and re-rendering.
-  function makeCard(ex, lang, meta, siblingIds, onSwap) {
+  function siblingIdsFor(scopeKey) {
+    if (scopeKey === "results") return currentExercises.map((e) => e.id);
+    const dayIdx = Number(scopeKey.slice(4));
+    return currentProgram.days[dayIdx].exercises.map((item) => item.exercise.id);
+  }
+
+  function makeCard(ex, lang, meta, scopeKey, onSwap) {
     const card = document.createElement("div");
     card.className = "card";
 
@@ -283,16 +292,25 @@
     swapBtn.className = "swap-btn";
     swapBtn.title = lang === "fr" ? "Remplacer" : "Swap";
     swapBtn.textContent = "⟲";
+    swapBtn.disabled = swappingScopes.has(scopeKey);
     swapBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
+      if (swappingScopes.has(scopeKey)) return;
+      swappingScopes.add(scopeKey);
       swapBtn.disabled = true;
       try {
-        const exclude = siblingIds.filter((id) => id !== ex.id).join(",");
+        const exclude = siblingIdsFor(scopeKey)
+          .filter((id) => id !== ex.id)
+          .join(",");
         const res = await fetch(`/api/exercise/${ex.id}/alternative?lang=${lang}&exclude=${exclude}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const alt = await res.json();
+        // clear before onSwap's re-render so the freshly built buttons for
+        // this scope come back enabled instead of permanently stuck
+        swappingScopes.delete(scopeKey);
         onSwap(alt);
       } catch (err) {
+        swappingScopes.delete(scopeKey);
         swapBtn.disabled = false;
       }
     });
@@ -304,11 +322,10 @@
   function renderResults(exercises, lang) {
     currentExercises = exercises;
     results.innerHTML = "";
-    const ids = exercises.map((e) => e.id);
     exercises.forEach((ex, i) => {
       cacheExercise(ex, lang);
       results.appendChild(
-        makeCard(ex, lang, null, ids, (alt) => {
+        makeCard(ex, lang, null, "results", (alt) => {
           currentExercises[i] = alt;
           renderResults(currentExercises, lang);
         })
@@ -325,11 +342,11 @@
       section.className = "day";
       const grid = document.createElement("div");
       grid.className = "grid";
-      const ids = day.exercises.map((item) => item.exercise.id);
+      const scopeKey = `day-${dayIdx}`;
       day.exercises.forEach((item, itemIdx) => {
         const meta = `${item.sets} × ${item.reps} · ${restLabel} ${item.rest_seconds}s`;
         grid.appendChild(
-          makeCard(item.exercise, lang, meta, ids, (alt) => {
+          makeCard(item.exercise, lang, meta, scopeKey, (alt) => {
             currentProgram.days[dayIdx].exercises[itemIdx].exercise = alt;
             renderProgram(currentProgram, lang);
           })
