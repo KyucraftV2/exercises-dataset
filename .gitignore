@@ -3,6 +3,8 @@ __pycache__/
 .DS_Store
 .venv/
 *.zip
+.env
+.idea/
 
 # Claude Code local settings (do not publish)
 .claude/
