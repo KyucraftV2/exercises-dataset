@@ -50,6 +50,21 @@ def get_exercise(exercise_id: str, lang: str = "fr") -> dict:
     return exercise
 
 
+@app.get("/api/exercise/{exercise_id}/alternative")
+def get_alternative(exercise_id: str, lang: str = "fr", exclude: str = "") -> dict:
+    if lang not in s.list_languages():
+        raise HTTPException(status_code=400, detail=f"Unsupported lang '{lang}'")
+    exercises_by_lang = s.get_lang(s.load_exercises(), lang)
+    exercise = next((ex for ex in exercises_by_lang if ex["id"] == exercise_id), None)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail=f"No exercise with id '{exercise_id}'")
+    exclude_ids = {x for x in exclude.split(",") if x}
+    alternative = s.find_alternative(exercises_by_lang, exercise, exclude_ids)
+    if alternative is None:
+        raise HTTPException(status_code=404, detail="No alternative exercise found")
+    return alternative
+
+
 @app.get("/api/mode")
 def mode() -> dict:
     return {"mode": get_mode(), "supported_langs": get_supported_langs()}
