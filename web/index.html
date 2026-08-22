@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sélecteur d'exercices IA</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --border: #262b38;
+    --text: #e7e9ee;
+    --muted: #8b92a5;
+    --accent: #5b8cff;
+    --bubble-user: #5b8cff;
+    --bubble-assistant: #1f2430;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header p { margin: .25rem 0 0; color: var(--muted); font-size: .85rem; }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  #log {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    min-height: 120px;
+  }
+  .msg { max-width: 80%; padding: .6rem .9rem; border-radius: .8rem; line-height: 1.4; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: var(--bubble-user); color: white; border-bottom-right-radius: .2rem; }
+  .msg.assistant { align-self: flex-start; background: var(--bubble-assistant); border-bottom-left-radius: .2rem; }
+  .msg.pending { opacity: .6; }
+  form { display: flex; gap: .5rem; }
+  select, input[type=text], button {
+    font-size: .95rem;
+    border-radius: .5rem;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    padding: .6rem .8rem;
+  }
+  input[type=text] { flex: 1; }
+  button {
+    background: var(--accent);
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: .8rem;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: .7rem;
+    overflow: hidden;
+  }
+  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #000; }
+  .card .info { padding: .5rem .6rem; }
+  .card .name { font-size: .85rem; font-weight: 600; margin: 0 0 .25rem; }
+  .card .tags { font-size: .72rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏋️ Sélecteur d'exercices IA</h1>
+  <p>Décris ce que tu veux travailler (matériel disponible, muscles, objectif) — l'assistant filtre les 1 324 exercices du dataset pour toi.</p>
+</header>
+<main>
+  <div id="log"></div>
+  <div id="results"></div>
+  <form id="chat-form">
+    <select id="lang"></select>
+    <input id="message" type="text" placeholder="Ex : haut du corps avec haltères, 6 exercices" autocomplete="off" />
+    <button type="submit">Envoyer</button>
+  </form>
+</main>
+<script>
+  const log = document.getElementById("log");
+  const results = document.getElementById("results");
+  const form = document.getElementById("chat-form");
+  const input = document.getElementById("message");
+  const langSelect = document.getElementById("lang");
+  const history = [];
+
+  (async function loadLanguages() {
+    try {
+      const res = await fetch("/api/languages");
+      const langs = await res.json();
+      langSelect.innerHTML = "";
+      for (const lang of langs) {
+        const opt = document.createElement("option");
+        opt.value = lang;
+        opt.textContent = lang.toUpperCase();
+        if (lang === "fr") opt.selected = true;
+        langSelect.appendChild(opt);
+      }
+    } catch (err) {
+      langSelect.innerHTML = '<option value="fr" selected>FR</option>';
+    }
+  })();
+
+  function addBubble(role, text) {
+    const div = document.createElement("div");
+    div.className = "msg " + role;
+    div.textContent = text;
+    log.appendChild(div);
+    div.scrollIntoView({ behavior: "smooth", block: "end" });
+    return div;
+  }
+
+  function renderResults(exercises) {
+    results.innerHTML = "";
+    for (const ex of exercises) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <img src="${ex.gif_url}" alt="${ex.name}" loading="lazy" />
+        <div class="info">
+          <p class="name">${ex.name}</p>
+          <p class="tags">${ex.equipment} · ${ex.category} · ${ex.target}</p>
+        </div>`;
+      results.appendChild(card);
+    }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+    input.value = "";
+    addBubble("user", message);
+    const pending = addBubble("assistant pending", "…");
+    form.querySelector("button").disabled = true;
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, lang: langSelect.value, history }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      pending.textContent = data.message;
+      pending.className = "msg assistant";
+      renderResults(data.exercises || []);
+      history.push({ role: "user", text: message });
+      history.push({ role: "assistant", text: data.message });
+    } catch (err) {
+      pending.textContent = "Erreur : impossible de contacter l'assistant (" + err.message + ").";
+      pending.className = "msg assistant";
+    } finally {
+      form.querySelector("button").disabled = false;
+      input.focus();
+    }
+  });
+</script>
+</body>
+</html>
