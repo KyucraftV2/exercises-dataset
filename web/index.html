@@ -212,6 +212,7 @@
   const programEl = document.getElementById("program");
   const exerciseCache = new Map(); // id -> { lang, data }
   let allLangsPromise = null;
+  let openId = null; // id of the exercise currently shown in the modal, if any
 
   function addBubble(role, text) {
     const div = document.createElement("div");
@@ -304,11 +305,14 @@
   async function openModal(id) {
     const cached = exerciseCache.get(id);
     if (!cached) return;
+    openId = id;
     fillModal(cached.data);
 
     const modalLang = document.getElementById("modal-lang");
     if (!modalLang.dataset.loaded) {
       const langs = await loadAllLangs();
+      // openModal may have been called again (or the modal closed) while this awaited
+      if (openId !== id) return;
       modalLang.innerHTML = "";
       for (const lang of langs) {
         const opt = document.createElement("option");
@@ -328,6 +332,8 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const exercise = await res.json();
         cacheExercise(exercise, newLang);
+        // the modal may since have been closed or switched to another exercise
+        if (openId !== id) return;
         fillModal(exercise);
       } catch (err) {
         // keep showing the previous language rather than a broken modal
@@ -338,6 +344,7 @@
   }
 
   function closeModal() {
+    openId = null;
     document.getElementById("modal-overlay").classList.add("hidden");
   }
 
@@ -357,12 +364,14 @@
     addBubble("user", message);
     const pending = addBubble("assistant pending", "…");
     form.querySelector("button").disabled = true;
+    langSelect.disabled = true;
+    const requestLang = langSelect.value; // frozen: langSelect may change while this request is in flight
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, lang: langSelect.value, history }),
+        body: JSON.stringify({ message, lang: requestLang, history }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -371,9 +380,9 @@
       results.innerHTML = "";
       programEl.innerHTML = "";
       if (data.program && data.program.days && data.program.days.length) {
-        renderProgram(data.program, langSelect.value);
+        renderProgram(data.program, requestLang);
       } else {
-        renderResults(data.exercises || [], langSelect.value);
+        renderResults(data.exercises || [], requestLang);
       }
       history.push({ role: "user", text: message });
       history.push({ role: "assistant", text: data.message });
@@ -382,6 +391,7 @@
       pending.className = "msg assistant";
     } finally {
       form.querySelector("button").disabled = false;
+      langSelect.disabled = false;
       input.focus();
     }
   });
