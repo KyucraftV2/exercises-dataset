@@ -6,6 +6,10 @@ muscle...) against the dataset's real values, and calls
 `scripting.filter_exercises` directly. It won't understand phrasing the
 keyword table doesn't cover - see `backend.assistant` for the Claude-backed
 mode, which handles free-form requests instead of fixed keywords.
+
+If the message asks for help figuring out a program (rather than already
+describing one), a fixed 3-question wizard (goal, equipment, days/week)
+runs instead - see WIZARD_TRIGGER_RE and _current_wizard_step.
 """
 
 import random
@@ -169,6 +173,53 @@ EXERCISES_PER_DAY = 5
 DEFAULT_SETS = 3
 DEFAULT_REPS = "8-12"
 DEFAULT_REST_SECONDS = 90
+DEFAULT_PROFILE = {"sets": DEFAULT_SETS, "reps": DEFAULT_REPS, "rest_seconds": DEFAULT_REST_SECONDS}
+
+# "Help me figure out a program" wizard: a fixed 3-question flow for people who
+# don't know what to ask for. Progress is inferred from the plain {role, text}
+# history the frontend already round-trips - see _current_wizard_step - so no
+# extra state needs to travel between requests.
+WIZARD_TRIGGER_RE = re.compile(
+    r"(\baide\b.*\bprogrammes?\b)|(\bprogrammes?\b.*\baide\b)"
+    r"|(\bhelp\b.*\bprograms?\b)|(\bprograms?\b.*\bhelp\b)"
+    r"|(je ne sais pas quoi faire)|(not sure what to do)|(dont know what to do)"
+)
+
+WIZARD_QUESTIONS = {
+    "fr": [
+        "Quel est ton objectif ? (perte de poids, prise de muscle, force, forme générale)",
+        "Quel matériel as-tu à disposition ? (haltères, barre, poids du corps, machine...)",
+        "Combien de jours par semaine veux-tu t'entraîner ? (1 à 6)",
+    ],
+    "en": [
+        "What's your goal? (weight loss, muscle gain, strength, general fitness)",
+        "What equipment do you have? (dumbbells, barbell, bodyweight, machine...)",
+        "How many days a week do you want to train? (1 to 6)",
+    ],
+}
+
+# Reverse lookup so wizard progress can be recovered regardless of which
+# language a past question was asked in (the user may switch languages
+# mid-flow) - every language's question text maps to the same step index.
+_QUESTION_TEXT_TO_STEP: dict[str, int] = {
+    text: step for lang_questions in WIZARD_QUESTIONS.values() for step, text in enumerate(lang_questions)
+}
+
+# goal keywords (already normalized, no accents) -> sets/reps/rest profile
+GOAL_PROFILES: list[tuple[tuple[str, ...], dict]] = [
+    (
+        ("perte", "maigrir", "cardio", "endurance", "fatloss", "weight loss", "lose weight"),
+        {"sets": 3, "reps": "15-20", "rest_seconds": 45},
+    ),
+    (
+        ("force", "strength", "puissance", "power"),
+        {"sets": 5, "reps": "4-6", "rest_seconds": 150},
+    ),
+    (
+        ("muscle", "masse", "hypertrophie", "hypertrophy", "gain", "bulk"),
+        {"sets": 4, "reps": "8-12", "rest_seconds": 90},
+    ),
+]
 
 
 def _normalize(text: str) -> str:
@@ -214,7 +265,13 @@ def _extract_days(normalized: str) -> int | None:
     return None
 
 
-def _build_program(days_count: int, equipment: list[str] | None, exercises_by_lang: list[dict]) -> dict:
+def _build_program(
+    days_count: int,
+    equipment: list[str] | None,
+    exercises_by_lang: list[dict],
+    profile: dict | None = None,
+) -> dict:
+    profile = profile or DEFAULT_PROFILE
     days = []
     used_ids: set[str] = set()
     for label in SPLIT_TEMPLATES[days_count]:
@@ -237,9 +294,9 @@ def _build_program(days_count: int, equipment: list[str] | None, exercises_by_la
                 "exercises": [
                     {
                         "exercise": exercise,
-                        "sets": DEFAULT_SETS,
-                        "reps": DEFAULT_REPS,
-                        "rest_seconds": DEFAULT_REST_SECONDS,
+                        "sets": profile["sets"],
+                        "reps": profile["reps"],
+                        "rest_seconds": profile["rest_seconds"],
                     }
                     for exercise in chosen
                 ],
@@ -248,14 +305,96 @@ def _build_program(days_count: int, equipment: list[str] | None, exercises_by_la
     return {"days": days}
 
 
+def _match_goal_profile(text: str) -> dict:
+    normalized = _normalize(text)
+    for keywords, profile in GOAL_PROFILES:
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", normalized) for kw in keywords):
+            return profile
+    return DEFAULT_PROFILE
+
+
+def _current_wizard_step(history: list[dict]) -> int | None:
+    """Which wizard step the incoming message would be answering, based
+    purely on whether the conversation's LAST turn was us asking one of
+    the wizard's questions (in any language - the user may switch mid-flow).
+    None means we're not currently mid-wizard: either it was never
+    started, or it already finished (its last message is the built
+    program/selection, not a question) - a stale finished run can't be
+    mistaken for one still awaiting an answer."""
+    if not history or history[-1].get("role") != "assistant":
+        return None
+    return _QUESTION_TEXT_TO_STEP.get((history[-1].get("text") or "").strip())
+
+
+def _collect_prior_wizard_answers(history: list[dict], answering_step: int) -> dict[int, str]:
+    """Walk backward from just before the question at `answering_step`,
+    collecting the contiguous chain of (question, answer) pairs for the
+    steps immediately preceding it. Stops at the first gap, so answers
+    from an earlier, already-finished wizard run can't leak into this one."""
+    answers: dict[int, str] = {}
+    step = answering_step
+    i = len(history) - 2  # the answer to step `step - 1`, just before history[-1]
+    while step > 0 and i >= 1:
+        user_turn, assistant_turn = history[i], history[i - 1]
+        prev_step = _QUESTION_TEXT_TO_STEP.get((assistant_turn.get("text") or "").strip())
+        if user_turn.get("role") != "user" or assistant_turn.get("role") != "assistant" or prev_step != step - 1:
+            break
+        answers[step - 1] = user_turn["text"]
+        step -= 1
+        i -= 2
+    return answers
+
+
+def _has_enough_for_direct_program(normalized: str) -> bool:
+    """True if a wizard-triggering message already gives enough detail to
+    build a program right away (explicit day count + equipment) - in that
+    case asking the wizard's questions would just be redundant."""
+    return bool(DAYS_RE.search(normalized)) and bool(_match_filters(normalized).get("equipment"))
+
+
+def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
+    goal_text = answers.get(0, "")
+    equipment_text = answers.get(1, "")
+    days_text = answers.get(2, "")
+
+    profile = _match_goal_profile(goal_text)
+    equipment = _match_filters(_normalize(equipment_text)).get("equipment")
+    days_match = re.search(r"\d+", _normalize(days_text))
+    days_count = max(1, min(int(days_match.group()), 6)) if days_match else 3
+
+    exercises_by_lang = s.get_lang(s.load_exercises(), lang)
+    program = _build_program(days_count, equipment, exercises_by_lang, profile)
+    if not program["days"]:
+        return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
+    template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
+    return {"message": template.format(n=len(program["days"])), "exercises": [], "program": program}
+
+
 def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
     normalized = _normalize(message)
+    questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
+
+    answering_step = _current_wizard_step(history)
+    if answering_step is not None:
+        # Mid-wizard: this message answers `answering_step` regardless of
+        # its content (even if it coincidentally contains trigger words).
+        answers = _collect_prior_wizard_answers(history, answering_step)
+        answers[answering_step] = message
+        next_step = answering_step + 1
+        if next_step < len(questions):
+            return {"message": questions[next_step], "exercises": [], "program": None}
+        return _finalize_wizard(answers, lang)
+
+    if WIZARD_TRIGGER_RE.search(normalized) and not _has_enough_for_direct_program(normalized):
+        return {"message": questions[0], "exercises": [], "program": None}
+
     filters = _match_filters(normalized)
     days_count = _extract_days(normalized)
 
     if days_count:
         exercises_by_lang = s.get_lang(s.load_exercises(), lang)
-        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang)
+        profile = _match_goal_profile(normalized)
+        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang, profile)
         if not program["days"]:
             return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
         template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
