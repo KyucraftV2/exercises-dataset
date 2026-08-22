@@ -9,7 +9,7 @@ mode, which handles free-form requests instead of fixed keywords.
 
 If the message asks for help figuring out a program (rather than already
 describing one), a fixed 3-question wizard (goal, equipment, days/week)
-runs instead - see WIZARD_TRIGGER_RE and _parse_wizard_progress.
+runs instead - see WIZARD_TRIGGER_RE and _current_wizard_step.
 """
 
 import random
@@ -177,7 +177,7 @@ DEFAULT_PROFILE = {"sets": DEFAULT_SETS, "reps": DEFAULT_REPS, "rest_seconds": D
 
 # "Help me figure out a program" wizard: a fixed 3-question flow for people who
 # don't know what to ask for. Progress is inferred from the plain {role, text}
-# history the frontend already round-trips - see _parse_wizard_progress - so no
+# history the frontend already round-trips - see _current_wizard_step - so no
 # extra state needs to travel between requests.
 WIZARD_TRIGGER_RE = re.compile(
     r"(\baide\b.*\bprogrammes?\b)|(\bprogrammes?\b.*\baide\b)"
@@ -313,35 +313,35 @@ def _match_goal_profile(text: str) -> dict:
     return DEFAULT_PROFILE
 
 
-def _last_trigger_index(transcript: list[dict]) -> int | None:
-    """Index of the most recent user turn that asked for wizard help, or
-    None. Used to bound progress-scanning to the current wizard run - so
-    re-triggering the wizard later in the same conversation starts fresh
-    instead of instantly "completing" with answers from a previous run."""
-    index = None
-    for i, turn in enumerate(transcript):
-        if turn.get("role") == "user" and WIZARD_TRIGGER_RE.search(_normalize(turn.get("text") or "")):
-            index = i
-    return index
+def _current_wizard_step(history: list[dict]) -> int | None:
+    """Which wizard step the incoming message would be answering, based
+    purely on whether the conversation's LAST turn was us asking one of
+    the wizard's questions (in any language - the user may switch mid-flow).
+    None means we're not currently mid-wizard: either it was never
+    started, or it already finished (its last message is the built
+    program/selection, not a question) - a stale finished run can't be
+    mistaken for one still awaiting an answer."""
+    if not history or history[-1].get("role") != "assistant":
+        return None
+    return _QUESTION_TEXT_TO_STEP.get((history[-1].get("text") or "").strip())
 
 
-def _parse_wizard_progress(transcript: list[dict]) -> dict[int, str]:
-    """Recover which wizard questions have been answered since the last
-    trigger, by scanning for a known question text (in any language - the
-    user may switch languages mid-flow) followed by a user reply."""
-    trigger_index = _last_trigger_index(transcript)
-    if trigger_index is None:
-        return {}
+def _collect_prior_wizard_answers(history: list[dict], answering_step: int) -> dict[int, str]:
+    """Walk backward from just before the question at `answering_step`,
+    collecting the contiguous chain of (question, answer) pairs for the
+    steps immediately preceding it. Stops at the first gap, so answers
+    from an earlier, already-finished wizard run can't leak into this one."""
     answers: dict[int, str] = {}
-    for i in range(trigger_index, len(transcript)):
-        turn = transcript[i]
-        if turn.get("role") != "assistant":
-            continue
-        step = _QUESTION_TEXT_TO_STEP.get((turn.get("text") or "").strip())
-        if step is None:
-            continue
-        if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user":
-            answers[step] = transcript[i + 1]["text"]
+    step = answering_step
+    i = len(history) - 2  # the answer to step `step - 1`, just before history[-1]
+    while step > 0 and i >= 1:
+        user_turn, assistant_turn = history[i], history[i - 1]
+        prev_step = _QUESTION_TEXT_TO_STEP.get((assistant_turn.get("text") or "").strip())
+        if user_turn.get("role") != "user" or assistant_turn.get("role") != "assistant" or prev_step != step - 1:
+            break
+        answers[step - 1] = user_turn["text"]
+        step -= 1
+        i -= 2
     return answers
 
 
@@ -371,24 +371,30 @@ def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
 
 
 def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
-    transcript = history + [{"role": "user", "text": message}]
-    wizard_answers = _parse_wizard_progress(transcript)
     normalized = _normalize(message)
+    questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
 
-    freshly_triggered = not wizard_answers and WIZARD_TRIGGER_RE.search(normalized)
-    if wizard_answers or (freshly_triggered and not _has_enough_for_direct_program(normalized)):
-        questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
-        next_step = len(wizard_answers)
+    answering_step = _current_wizard_step(history)
+    if answering_step is not None:
+        # Mid-wizard: this message answers `answering_step` regardless of
+        # its content (even if it coincidentally contains trigger words).
+        answers = _collect_prior_wizard_answers(history, answering_step)
+        answers[answering_step] = message
+        next_step = answering_step + 1
         if next_step < len(questions):
             return {"message": questions[next_step], "exercises": [], "program": None}
-        return _finalize_wizard(wizard_answers, lang)
+        return _finalize_wizard(answers, lang)
+
+    if WIZARD_TRIGGER_RE.search(normalized) and not _has_enough_for_direct_program(normalized):
+        return {"message": questions[0], "exercises": [], "program": None}
 
     filters = _match_filters(normalized)
     days_count = _extract_days(normalized)
 
     if days_count:
         exercises_by_lang = s.get_lang(s.load_exercises(), lang)
-        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang)
+        profile = _match_goal_profile(normalized)
+        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang, profile)
         if not program["days"]:
             return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
         template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
