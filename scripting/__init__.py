@@ -1,10 +1,35 @@
-from a import *
+from .data import (
+    load_exercises,
+    load_schema,
+    get_lang,
+    list_equipment,
+    list_categories,
+    list_targets,
+    list_muscle_groups,
+    list_languages,
+)
+from .filters import (
+    filter_exercises,
+    filter_by_equipment,
+    filter_by_muscle_group,
+    filter_by_body_part,
+    filter_by_category,
+    filter_by_target,
+)
 
-frenchexo = get_lang("fr")
-
-list_equipment = []
-for exercise in data_exercises:
-    for k,v in exercise.items():
-        if k == 'equipment':
-            if v not in list_equipment:
-                list_equipment.append(v)
+__all__ = [
+    "load_exercises",
+    "load_schema",
+    "get_lang",
+    "list_equipment",
+    "list_categories",
+    "list_targets",
+    "list_muscle_groups",
+    "list_languages",
+    "filter_exercises",
+    "filter_by_equipment",
+    "filter_by_muscle_group",
+    "filter_by_body_part",
+    "filter_by_category",
+    "filter_by_target",
+]
