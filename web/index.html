@@ -28,6 +28,17 @@
   }
   header h1 { margin: 0; font-size: 1.15rem; }
   header p { margin: .25rem 0 0; color: var(--muted); font-size: .85rem; }
+  #mode-badge {
+    display: inline-block;
+    margin-top: .5rem;
+    padding: .15rem .55rem;
+    border-radius: 1rem;
+    font-size: .72rem;
+    font-weight: 600;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
   main {
     max-width: 900px;
     margin: 0 auto;
@@ -85,6 +96,7 @@
 <header>
   <h1>🏋️ Sélecteur d'exercices IA</h1>
   <p>Décris ce que tu veux travailler (matériel disponible, muscles, objectif) — l'assistant filtre les 1 324 exercices du dataset pour toi.</p>
+  <span id="mode-badge"></span>
 </header>
 <main>
   <div id="log"></div>
@@ -102,6 +114,17 @@
   const input = document.getElementById("message");
   const langSelect = document.getElementById("lang");
   const history = [];
+  const modeBadge = document.getElementById("mode-badge");
+
+  (async function loadMode() {
+    try {
+      const res = await fetch("/api/mode");
+      const data = await res.json();
+      modeBadge.textContent = data.mode === "claude" ? "mode Claude" : "mode local (sans API)";
+    } catch (err) {
+      modeBadge.textContent = "";
+    }
+  })();
 
   (async function loadLanguages() {
     try {
