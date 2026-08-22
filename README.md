@@ -42,6 +42,7 @@
 - [Data Source](#-data-source)
 - [Overview](#-overview)
 - [Interactive Browser & Developer Setup](#-interactive-browser--developer-setup)
+- [AI Exercise Selector](#-ai-exercise-selector)
 - [File Structure](#-file-structure)
 - [Statistics](#-statistics)
 - [Data Schema](#-data-schema)
@@ -100,6 +101,26 @@ A step-by-step guide for integrating the dataset into your own application:
 
 ---
 
+## 🤖 AI Exercise Selector
+
+A small FastAPI backend (`backend/`) plus a chat frontend (`web/`) that let you describe a
+workout in plain language (equipment available, muscles to train, goal) and get back a
+selection of real exercises from this dataset — picked by Claude using tool calls constrained
+to the dataset's actual equipment/category/target/muscle_group values, so it can't invent
+exercises that don't exist here.
+
+```bash
+pip install -r backend/requirements.txt
+cp .env.example .env   # add your ANTHROPIC_API_KEY
+uvicorn backend.main:app --reload
+# open http://127.0.0.1:8000
+```
+
+The filtering logic itself lives in `scripting/` (`scripting.filter_exercises`) and can be
+reused outside the AI assistant — see [Usage Examples](#-usage-examples).
+
+---
+
 ## 📂 File Structure
 
 ```
@@ -107,6 +128,9 @@ exercises-dataset/
 ├── data/
 │   ├── exercises.json        # Full dataset — 1,324 exercise records (JSON array)
 │   └── exercises.schema.json # JSON Schema (2020-12) describing every record
+├── scripting/                # Python data-loading & filtering helpers (used by backend/)
+├── backend/                  # FastAPI service powering the AI exercise selector
+├── web/                      # Chat frontend served by backend/ at http://127.0.0.1:8000
 ├── images/                  # 1,324 × 180×180 thumbnails  (© Gym visual)
 ├── videos/                  # 1,324 × 180×180 animation GIFs  (© Gym visual)
 ├── index.html               # Interactive exercise browser (client-side, no server needed)
