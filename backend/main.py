@@ -153,6 +153,11 @@ class DoneRequest(BaseModel):
     done: bool
 
 
+class SwapRequest(BaseModel):
+    day_index: int
+    exercise_id: str
+
+
 @app.get("/api/plan")
 def get_my_plan(lang: str | None = None, username: str = Depends(get_current_username)) -> dict:
     if lang is not None and lang not in s.list_languages():
@@ -188,6 +193,16 @@ def mark_exercise_done(body: DoneRequest, username: str = Depends(get_current_us
     if not plans.set_exercise_done(username, body.day_index, body.exercise_id, body.done):
         raise HTTPException(status_code=404, detail="Plan, day, or exercise not found")
     return plans.get_plan(username)
+
+
+@app.post("/api/plan/exercise/swap")
+def swap_plan_exercise(body: SwapRequest, username: str = Depends(get_current_username)) -> dict:
+    updated = plans.swap_exercise(username, body.day_index, body.exercise_id)
+    if updated is None:
+        raise HTTPException(
+            status_code=404, detail="Plan, day, exercise not found, or no alternative available"
+        )
+    return updated
 
 
 @app.post("/api/chat", response_model=ChatResponse)
