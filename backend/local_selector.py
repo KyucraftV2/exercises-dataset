@@ -8,8 +8,8 @@ keyword table doesn't cover - see `backend.assistant` for the Claude-backed
 mode, which handles free-form requests instead of fixed keywords.
 
 If the message asks for help figuring out a program (rather than already
-describing one), a fixed 3-question wizard (goal, equipment, days/week)
-runs instead - see WIZARD_TRIGGER_RE and _current_wizard_step.
+describing one), a fixed wizard (goal, equipment, days/week, level) runs
+instead - see WIZARD_TRIGGER_RE and _current_wizard_step.
 """
 
 import random
@@ -175,8 +175,8 @@ DEFAULT_REPS = "8-12"
 DEFAULT_REST_SECONDS = 90
 DEFAULT_PROFILE = {"sets": DEFAULT_SETS, "reps": DEFAULT_REPS, "rest_seconds": DEFAULT_REST_SECONDS}
 
-# "Help me figure out a program" wizard: a fixed 3-question flow for people who
-# don't know what to ask for. Progress is inferred from the plain {role, text}
+# "Help me figure out a program" wizard: a fixed flow for people who don't
+# know what to ask for. Progress is inferred from the plain {role, text}
 # history the frontend already round-trips - see _current_wizard_step - so no
 # extra state needs to travel between requests.
 WIZARD_TRIGGER_RE = re.compile(
