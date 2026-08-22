@@ -11,6 +11,9 @@ DEFAULT_LIMIT = 6
 MAX_SELECTED_TOTAL = 12
 MAX_SETS = 10
 MAX_REST_SECONDS = 600
+DEFAULT_SETS = 3
+DEFAULT_REPS = "8-12"
+DEFAULT_REST_SECONDS = 90
 
 _client: Anthropic | None = None
 
@@ -69,9 +72,10 @@ def _submit_program_schema() -> dict:
             "Submit a finished multi-day training program. Only call this when the "
             "user asked for a program/split across several days or sessions - for a "
             "single flat exercise selection, just reply with text instead. Every "
-            "exercise_id must be one returned by a previous filter_exercises call. "
-            "Pick sets/reps/rest yourself using standard strength-training practice - "
-            "the dataset has no such data."
+            "exercise_id must be one you saw in a previous filter_exercises result - "
+            "any id you didn't actually see will be silently dropped from the "
+            "program. Pick sets/reps/rest yourself using standard strength-training "
+            "practice - the dataset has no such data."
         ),
         "input_schema": {
             "type": "object",
@@ -171,6 +175,13 @@ def _system_prompt(lang: str) -> str:
     )
 
 
+def _clamp(value, low: int, high: int, default: int) -> int:
+    try:
+        return max(low, min(int(value), high))
+    except (TypeError, ValueError):
+        return default
+
+
 def _build_program(payload: dict, by_id: dict[str, dict]) -> dict:
     days = []
     for day in payload.get("days", []):
@@ -182,9 +193,11 @@ def _build_program(payload: dict, by_id: dict[str, dict]) -> dict:
             exercises.append(
                 {
                     "exercise": exercise,
-                    "sets": item.get("sets"),
-                    "reps": item.get("reps"),
-                    "rest_seconds": item.get("rest_seconds"),
+                    "sets": _clamp(item.get("sets"), 1, MAX_SETS, DEFAULT_SETS),
+                    "reps": str(item.get("reps") or DEFAULT_REPS),
+                    "rest_seconds": _clamp(
+                        item.get("rest_seconds"), 0, MAX_REST_SECONDS, DEFAULT_REST_SECONDS
+                    ),
                 }
             )
         if exercises:
@@ -220,10 +233,17 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
             None,
         )
         if program_block is not None:
+            program = _build_program(program_block["input"], by_id)
+            if not program["days"]:
+                return {
+                    "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
+                    "exercises": [],
+                    "program": None,
+                }
             return {
                 "message": program_block["input"].get("message", ""),
                 "exercises": [],
-                "program": _build_program(program_block["input"], by_id),
+                "program": program,
             }
 
         if response.stop_reason != "tool_use":
