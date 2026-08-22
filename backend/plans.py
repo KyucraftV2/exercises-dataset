@@ -63,3 +63,35 @@ def set_exercise_done(username: str, day_index: int, exercise_id: str, done: boo
             storage.save_plan(username, stored["lang"], days)
             return True
     return False
+
+
+def swap_exercise(username: str, day_index: int, exercise_id: str) -> dict | None:
+    """Replace `exercise_id` within `day_index` with a fresh alternative,
+    persist it, and return the fully hydrated updated plan - or None if the
+    user has no plan, the day index is out of range, the exercise isn't in
+    that day, or no alternative could be found."""
+    stored = storage.get_plan(username)
+    if stored is None:
+        return None
+    days = stored["days"]
+    if not 0 <= day_index < len(days):
+        return None
+    day = days[day_index]
+    exercise_ids_in_day = {item["exercise_id"] for item in day.get("exercises", [])}
+    if exercise_id not in exercise_ids_in_day:
+        return None
+
+    original = s.get_exercise_by_id(exercise_id, stored["lang"])
+    if original is None:
+        return None
+    exercises_by_lang = s.get_lang(s.load_exercises(), stored["lang"])
+    alternative = s.find_alternative(exercises_by_lang, original, exercise_ids_in_day)
+    if alternative is None:
+        return None
+
+    for item in day["exercises"]:
+        if item["exercise_id"] == exercise_id:
+            item["exercise_id"] = alternative["id"]
+            break
+    storage.save_plan(username, stored["lang"], days)
+    return {"lang": stored["lang"], "days": _hydrate(days, stored["lang"])}
