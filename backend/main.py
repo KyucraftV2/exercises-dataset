@@ -136,7 +136,7 @@ class DoneRequest(BaseModel):
 
 
 @app.get("/api/plan")
-def get_my_plan(username: str = Depends(get_current_username), lang: str | None = None) -> dict:
+def get_my_plan(lang: str | None = None, username: str = Depends(get_current_username)) -> dict:
     if lang is not None and lang not in s.list_languages():
         raise HTTPException(status_code=400, detail=f"Unsupported lang '{lang}'")
     plan = plans.get_plan(username, lang)
@@ -152,6 +152,9 @@ def put_my_plan(body: PlanIn, username: str = Depends(get_current_username)) -> 
     for day in body.days:
         if day.weekday is not None and day.weekday not in plans.WEEKDAYS:
             raise HTTPException(status_code=400, detail=f"Invalid weekday '{day.weekday}'")
+        exercise_ids = [item.exercise_id for item in day.exercises]
+        if len(exercise_ids) != len(set(exercise_ids)):
+            raise HTTPException(status_code=400, detail=f"Duplicate exercise in day '{day.label}'")
     plans.save_plan(username, body.lang, [d.model_dump() for d in body.days])
     return plans.get_plan(username, body.lang)
 
