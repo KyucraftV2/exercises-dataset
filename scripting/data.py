@@ -28,6 +28,18 @@ def get_lang(exercises: list[dict], lang: str) -> list[dict]:
     return flattened
 
 
+def get_exercise_by_id(exercise_id: str, lang: str) -> dict | None:
+    exercise = _index_by_id().get(exercise_id)
+    if exercise is None:
+        return None
+    return get_lang([exercise], lang)[0]
+
+
+@lru_cache(maxsize=1)
+def _index_by_id() -> dict[str, dict]:
+    return {exercise["id"]: exercise for exercise in load_exercises()}
+
+
 def _unique_values(field: str) -> list[str]:
     values = {exercise[field] for exercise in load_exercises()}
     return sorted(values)
