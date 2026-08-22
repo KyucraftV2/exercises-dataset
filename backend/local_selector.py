@@ -6,6 +6,10 @@ muscle...) against the dataset's real values, and calls
 `scripting.filter_exercises` directly. It won't understand phrasing the
 keyword table doesn't cover - see `backend.assistant` for the Claude-backed
 mode, which handles free-form requests instead of fixed keywords.
+
+If the message asks for help figuring out a program (rather than already
+describing one), a fixed 3-question wizard (goal, equipment, days/week)
+runs instead - see WIZARD_TRIGGER_RE and _parse_wizard_progress.
 """
 
 import random
@@ -169,6 +173,46 @@ EXERCISES_PER_DAY = 5
 DEFAULT_SETS = 3
 DEFAULT_REPS = "8-12"
 DEFAULT_REST_SECONDS = 90
+DEFAULT_PROFILE = {"sets": DEFAULT_SETS, "reps": DEFAULT_REPS, "rest_seconds": DEFAULT_REST_SECONDS}
+
+# "Help me figure out a program" wizard: a fixed 3-question flow for people who
+# don't know what to ask for. Progress is inferred from the plain {role, text}
+# history the frontend already round-trips - see _parse_wizard_progress - so no
+# extra state needs to travel between requests.
+WIZARD_TRIGGER_RE = re.compile(
+    r"(\baide\b.*\bprogrammes?\b)|(\bprogrammes?\b.*\baide\b)"
+    r"|(\bhelp\b.*\bprograms?\b)|(\bprograms?\b.*\bhelp\b)"
+    r"|(je ne sais pas quoi faire)|(not sure what to do)|(dont know what to do)"
+)
+
+WIZARD_QUESTIONS = {
+    "fr": [
+        "Quel est ton objectif ? (perte de poids, prise de muscle, force, forme générale)",
+        "Quel matériel as-tu à disposition ? (haltères, barre, poids du corps, machine...)",
+        "Combien de jours par semaine veux-tu t'entraîner ? (1 à 6)",
+    ],
+    "en": [
+        "What's your goal? (weight loss, muscle gain, strength, general fitness)",
+        "What equipment do you have? (dumbbells, barbell, bodyweight, machine...)",
+        "How many days a week do you want to train? (1 to 6)",
+    ],
+}
+
+# goal keywords (already normalized, no accents) -> sets/reps/rest profile
+GOAL_PROFILES: list[tuple[tuple[str, ...], dict]] = [
+    (
+        ("perte", "maigrir", "cardio", "endurance", "fatloss", "weight loss", "lose weight"),
+        {"sets": 3, "reps": "15-20", "rest_seconds": 45},
+    ),
+    (
+        ("force", "strength", "puissance", "power"),
+        {"sets": 5, "reps": "4-6", "rest_seconds": 150},
+    ),
+    (
+        ("muscle", "masse", "hypertrophie", "hypertrophy", "gain", "bulk"),
+        {"sets": 4, "reps": "8-12", "rest_seconds": 90},
+    ),
+]
 
 
 def _normalize(text: str) -> str:
@@ -214,7 +258,13 @@ def _extract_days(normalized: str) -> int | None:
     return None
 
 
-def _build_program(days_count: int, equipment: list[str] | None, exercises_by_lang: list[dict]) -> dict:
+def _build_program(
+    days_count: int,
+    equipment: list[str] | None,
+    exercises_by_lang: list[dict],
+    profile: dict | None = None,
+) -> dict:
+    profile = profile or DEFAULT_PROFILE
     days = []
     used_ids: set[str] = set()
     for label in SPLIT_TEMPLATES[days_count]:
@@ -237,9 +287,9 @@ def _build_program(days_count: int, equipment: list[str] | None, exercises_by_la
                 "exercises": [
                     {
                         "exercise": exercise,
-                        "sets": DEFAULT_SETS,
-                        "reps": DEFAULT_REPS,
-                        "rest_seconds": DEFAULT_REST_SECONDS,
+                        "sets": profile["sets"],
+                        "reps": profile["reps"],
+                        "rest_seconds": profile["rest_seconds"],
                     }
                     for exercise in chosen
                 ],
@@ -248,8 +298,60 @@ def _build_program(days_count: int, equipment: list[str] | None, exercises_by_la
     return {"days": days}
 
 
+def _match_goal_profile(text: str) -> dict:
+    normalized = _normalize(text)
+    for keywords, profile in GOAL_PROFILES:
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", normalized) for kw in keywords):
+            return profile
+    return DEFAULT_PROFILE
+
+
+def _parse_wizard_progress(transcript: list[dict], questions: list[str]) -> dict[int, str]:
+    """Recover which wizard questions have been answered so far by scanning
+    the transcript for our exact question text followed by a user reply."""
+    answers: dict[int, str] = {}
+    for i, turn in enumerate(transcript):
+        if turn.get("role") != "assistant":
+            continue
+        try:
+            step = questions.index((turn.get("text") or "").strip())
+        except ValueError:
+            continue
+        if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user":
+            answers[step] = transcript[i + 1]["text"]
+    return answers
+
+
+def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
+    goal_text = answers.get(0, "")
+    equipment_text = answers.get(1, "")
+    days_text = answers.get(2, "")
+
+    profile = _match_goal_profile(goal_text)
+    equipment = _match_filters(_normalize(equipment_text)).get("equipment")
+    days_match = re.search(r"\d+", _normalize(days_text))
+    days_count = max(1, min(int(days_match.group()), 6)) if days_match else 3
+
+    exercises_by_lang = s.get_lang(s.load_exercises(), lang)
+    program = _build_program(days_count, equipment, exercises_by_lang, profile)
+    if not program["days"]:
+        return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
+    template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
+    return {"message": template.format(n=len(program["days"])), "exercises": [], "program": program}
+
+
 def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
+    questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
+    transcript = history + [{"role": "user", "text": message}]
+    wizard_answers = _parse_wizard_progress(transcript, questions)
     normalized = _normalize(message)
+
+    if wizard_answers or WIZARD_TRIGGER_RE.search(normalized):
+        next_step = len(wizard_answers)
+        if next_step < len(questions):
+            return {"message": questions[next_step], "exercises": [], "program": None}
+        return _finalize_wizard(wizard_answers, lang)
+
     filters = _match_filters(normalized)
     days_count = _extract_days(normalized)
 
