@@ -116,29 +116,29 @@
   const history = [];
   const modeBadge = document.getElementById("mode-badge");
 
-  (async function loadMode() {
+  // Language options come from /api/mode, not /api/languages: the local
+  // (no-API) mode only understands a couple of languages even though the
+  // dataset itself has instructions in ten - offering the rest would let
+  // the user pick a language that silently never matches anything.
+  (async function loadModeAndLanguages() {
     try {
       const res = await fetch("/api/mode");
       const data = await res.json();
       modeBadge.textContent = data.mode === "claude" ? "mode Claude" : "mode local (sans API)";
-    } catch (err) {
-      modeBadge.textContent = "";
-    }
-  })();
 
-  (async function loadLanguages() {
-    try {
-      const res = await fetch("/api/languages");
-      const langs = await res.json();
       langSelect.innerHTML = "";
-      for (const lang of langs) {
+      for (const lang of data.supported_langs) {
         const opt = document.createElement("option");
         opt.value = lang;
         opt.textContent = lang.toUpperCase();
         if (lang === "fr") opt.selected = true;
         langSelect.appendChild(opt);
       }
+      if (!langSelect.value && langSelect.options.length) {
+        langSelect.options[0].selected = true;
+      }
     } catch (err) {
+      modeBadge.textContent = "";
       langSelect.innerHTML = '<option value="fr" selected>FR</option>';
     }
   })();
