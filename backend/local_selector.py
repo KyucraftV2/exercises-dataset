@@ -190,11 +190,13 @@ WIZARD_QUESTIONS = {
         "Quel est ton objectif ? (perte de poids, prise de muscle, force, forme générale)",
         "Quel matériel as-tu à disposition ? (haltères, barre, poids du corps, machine...)",
         "Combien de jours par semaine veux-tu t'entraîner ? (1 à 6)",
+        "Quel est ton niveau ? (débutant, intermédiaire, avancé)",
     ],
     "en": [
         "What's your goal? (weight loss, muscle gain, strength, general fitness)",
         "What equipment do you have? (dumbbells, barbell, bodyweight, machine...)",
         "How many days a week do you want to train? (1 to 6)",
+        "What's your level? (beginner, intermediate, advanced)",
     ],
 }
 
@@ -220,6 +222,29 @@ GOAL_PROFILES: list[tuple[tuple[str, ...], dict]] = [
         {"sets": 4, "reps": "8-12", "rest_seconds": 90},
     ),
 ]
+
+# level keywords -> canonical level name, used both to nudge the goal-based
+# volume (fewer sets / more rest for a beginner, the opposite for advanced)
+# and, for a beginner with no explicit equipment mentioned, to steer the
+# exercise pool away from more technical free-weight lifts. This is a
+# heuristic, not a real per-exercise difficulty rating - the dataset has no
+# such field.
+LEVEL_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    (("debutant", "debutante", "beginner", "novice"), "beginner"),
+    (("intermediaire", "intermediate"), "intermediate"),
+    (("avance", "avancee", "advanced", "expert", "confirme", "confirmee"), "advanced"),
+]
+
+LEVEL_VOLUME_ADJUST: dict[str, dict[str, int]] = {
+    "beginner": {"sets_delta": -1, "rest_delta": 30},
+    "intermediate": {"sets_delta": 0, "rest_delta": 0},
+    "advanced": {"sets_delta": 1, "rest_delta": -15},
+}
+
+# Equipment steered away from for a beginner with no explicit equipment
+# request - technical barbell/machine lifts with a real injury-risk-from-bad-
+# form factor, not a judgment on the exercises themselves.
+COMPLEX_EQUIPMENT = {"barbell", "olympic barbell", "trap bar", "smith machine"}
 
 
 def _normalize(text: str) -> str:
@@ -313,6 +338,37 @@ def _match_goal_profile(text: str) -> dict:
     return DEFAULT_PROFILE
 
 
+def _match_level(text: str) -> str | None:
+    normalized = _normalize(text)
+    for keywords, level in LEVEL_KEYWORDS:
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", normalized) for kw in keywords):
+            return level
+    return None
+
+
+def _apply_level(profile: dict, level: str | None) -> dict:
+    """Nudge a goal-based profile's volume by level - fewer sets/more rest
+    for a beginner, the opposite for advanced. A level that doesn't map to
+    an adjustment (None, or unrecognized) leaves the profile untouched."""
+    adjust = LEVEL_VOLUME_ADJUST.get(level) if level else None
+    if not adjust:
+        return profile
+    return {
+        "sets": max(1, profile["sets"] + adjust["sets_delta"]),
+        "reps": profile["reps"],
+        "rest_seconds": max(15, profile["rest_seconds"] + adjust["rest_delta"]),
+    }
+
+
+def _equipment_for_level(equipment: list[str] | None, level: str | None) -> list[str] | None:
+    """A beginner with no explicit equipment request gets steered away from
+    COMPLEX_EQUIPMENT; an explicit equipment mention (even a complex one) is
+    always respected as-is, at any level."""
+    if equipment or level != "beginner":
+        return equipment
+    return [eq for eq in s.list_equipment() if eq not in COMPLEX_EQUIPMENT]
+
+
 def _current_wizard_step(history: list[dict]) -> int | None:
     """Which wizard step the incoming message would be answering, based
     purely on whether the conversation's LAST turn was us asking one of
@@ -356,9 +412,11 @@ def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
     goal_text = answers.get(0, "")
     equipment_text = answers.get(1, "")
     days_text = answers.get(2, "")
+    level_text = answers.get(3, "")
 
-    profile = _match_goal_profile(goal_text)
-    equipment = _match_filters(_normalize(equipment_text)).get("equipment")
+    level = _match_level(level_text)
+    profile = _apply_level(_match_goal_profile(goal_text), level)
+    equipment = _equipment_for_level(_match_filters(_normalize(equipment_text)).get("equipment"), level)
     days_match = re.search(r"\d+", _normalize(days_text))
     days_count = max(1, min(int(days_match.group()), 6)) if days_match else 3
 
@@ -393,8 +451,10 @@ def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
 
     if days_count:
         exercises_by_lang = s.get_lang(s.load_exercises(), lang)
-        profile = _match_goal_profile(normalized)
-        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang, profile)
+        level = _match_level(normalized)
+        profile = _apply_level(_match_goal_profile(normalized), level)
+        equipment = _equipment_for_level(filters.get("equipment"), level)
+        program = _build_program(days_count, equipment, exercises_by_lang, profile)
         if not program["days"]:
             return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
         template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
