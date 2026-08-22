@@ -198,6 +198,13 @@ WIZARD_QUESTIONS = {
     ],
 }
 
+# Reverse lookup so wizard progress can be recovered regardless of which
+# language a past question was asked in (the user may switch languages
+# mid-flow) - every language's question text maps to the same step index.
+_QUESTION_TEXT_TO_STEP: dict[str, int] = {
+    text: step for lang_questions in WIZARD_QUESTIONS.values() for step, text in enumerate(lang_questions)
+}
+
 # goal keywords (already normalized, no accents) -> sets/reps/rest profile
 GOAL_PROFILES: list[tuple[tuple[str, ...], dict]] = [
     (
@@ -306,20 +313,43 @@ def _match_goal_profile(text: str) -> dict:
     return DEFAULT_PROFILE
 
 
-def _parse_wizard_progress(transcript: list[dict], questions: list[str]) -> dict[int, str]:
-    """Recover which wizard questions have been answered so far by scanning
-    the transcript for our exact question text followed by a user reply."""
-    answers: dict[int, str] = {}
+def _last_trigger_index(transcript: list[dict]) -> int | None:
+    """Index of the most recent user turn that asked for wizard help, or
+    None. Used to bound progress-scanning to the current wizard run - so
+    re-triggering the wizard later in the same conversation starts fresh
+    instead of instantly "completing" with answers from a previous run."""
+    index = None
     for i, turn in enumerate(transcript):
+        if turn.get("role") == "user" and WIZARD_TRIGGER_RE.search(_normalize(turn.get("text") or "")):
+            index = i
+    return index
+
+
+def _parse_wizard_progress(transcript: list[dict]) -> dict[int, str]:
+    """Recover which wizard questions have been answered since the last
+    trigger, by scanning for a known question text (in any language - the
+    user may switch languages mid-flow) followed by a user reply."""
+    trigger_index = _last_trigger_index(transcript)
+    if trigger_index is None:
+        return {}
+    answers: dict[int, str] = {}
+    for i in range(trigger_index, len(transcript)):
+        turn = transcript[i]
         if turn.get("role") != "assistant":
             continue
-        try:
-            step = questions.index((turn.get("text") or "").strip())
-        except ValueError:
+        step = _QUESTION_TEXT_TO_STEP.get((turn.get("text") or "").strip())
+        if step is None:
             continue
         if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user":
             answers[step] = transcript[i + 1]["text"]
     return answers
+
+
+def _has_enough_for_direct_program(normalized: str) -> bool:
+    """True if a wizard-triggering message already gives enough detail to
+    build a program right away (explicit day count + equipment) - in that
+    case asking the wizard's questions would just be redundant."""
+    return bool(DAYS_RE.search(normalized)) and bool(_match_filters(normalized).get("equipment"))
 
 
 def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
@@ -341,12 +371,13 @@ def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
 
 
 def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
-    questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
     transcript = history + [{"role": "user", "text": message}]
-    wizard_answers = _parse_wizard_progress(transcript, questions)
+    wizard_answers = _parse_wizard_progress(transcript)
     normalized = _normalize(message)
 
-    if wizard_answers or WIZARD_TRIGGER_RE.search(normalized):
+    freshly_triggered = not wizard_answers and WIZARD_TRIGGER_RE.search(normalized)
+    if wizard_answers or (freshly_triggered and not _has_enough_for_direct_program(normalized)):
+        questions = WIZARD_QUESTIONS.get(lang, WIZARD_QUESTIONS["en"])
         next_step = len(wizard_answers)
         if next_step < len(questions):
             return {"message": questions[next_step], "exercises": [], "program": None}
