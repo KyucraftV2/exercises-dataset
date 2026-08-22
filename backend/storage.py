@@ -84,7 +84,14 @@ def login(username: str, password: str) -> str | None:
     None if the username/password combination is invalid."""
     with _connect() as conn:
         row = conn.execute("SELECT password_hash FROM users WHERE username = ?", (username,)).fetchone()
-        if row is None or not auth.verify_password(password, row["password_hash"]):
+        # Always run the (expensive) hash check, even for a username that
+        # doesn't exist - otherwise a missing user short-circuits and
+        # returns ~600k PBKDF2 iterations faster than a wrong password for
+        # a real one, letting an attacker enumerate registered usernames
+        # purely from response timing.
+        password_hash = row["password_hash"] if row is not None else auth.DUMMY_HASH
+        password_ok = auth.verify_password(password, password_hash)
+        if row is None or not password_ok:
             return None
         token = auth.generate_token()
         conn.execute(
