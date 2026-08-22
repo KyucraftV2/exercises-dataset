@@ -86,7 +86,10 @@ def register(req: AuthRequest) -> AuthResponse:
         )
     if not auth.validate_password(req.password):
         raise HTTPException(
-            status_code=400, detail=f"Password must be at least {auth.MIN_PASSWORD_LENGTH} characters"
+            status_code=400,
+            detail=(
+                f"Password must be {auth.MIN_PASSWORD_LENGTH} to {auth.MAX_PASSWORD_LENGTH} characters"
+            ),
         )
     try:
         token = storage.create_user(req.username, req.password)
