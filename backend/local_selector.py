@@ -130,6 +130,46 @@ FOUND_TEMPLATES = {
     "en": "Here are {n} exercise(s) - {desc}.",
 }
 
+PROGRAM_FOUND_TEMPLATES = {
+    "fr": "Voici un programme sur {n} jour(s).",
+    "en": "Here's a {n}-day program.",
+}
+
+DAYS_RE = re.compile(r"(\d+)\s*(jours?|days?|seances?|sessions?)")
+PROGRAM_WORD_RE = re.compile(r"\bprogrammes?\b|\bprograms?\b|\bsplit\b")
+
+# Pre-built day splits, picked by requested day count (1-6, see _extract_days).
+SPLIT_TEMPLATES: dict[int, list[str]] = {
+    1: ["Full Body"],
+    2: ["Haut du corps / Upper", "Bas du corps / Lower"],
+    3: ["Push", "Pull", "Legs"],
+    4: ["Push", "Pull", "Legs", "Full Body"],
+    5: ["Push", "Pull", "Legs", "Haut du corps / Upper", "Bas du corps / Lower"],
+    6: ["Push", "Pull", "Legs", "Push", "Pull", "Legs"],
+}
+
+# Day label -> list of filter kwargs, unioned (OR) to build that day's pool.
+DAY_FILTERS: dict[str, list[dict[str, list[str]]]] = {
+    "Push": [{"category": ["chest", "shoulders"]}, {"target": ["triceps"]}],
+    "Pull": [{"category": ["back"]}, {"target": ["biceps"]}],
+    "Legs": [{"category": ["upper legs", "lower legs"]}],
+    "Haut du corps / Upper": [
+        {"category": ["chest", "back", "shoulders", "upper arms", "lower arms"]}
+    ],
+    "Bas du corps / Lower": [{"category": ["upper legs", "lower legs"]}],
+    "Full Body": [
+        {"category": ["chest"]},
+        {"category": ["back"]},
+        {"category": ["upper legs", "lower legs"]},
+        {"category": ["shoulders"]},
+    ],
+}
+
+EXERCISES_PER_DAY = 5
+DEFAULT_SETS = 3
+DEFAULT_REPS = "8-12"
+DEFAULT_REST_SECONDS = 90
+
 
 def _normalize(text: str) -> str:
     text = text.lower()
@@ -165,18 +205,78 @@ def _describe_filters(filters: dict[str, list[str]], lang: str) -> str:
     return " | ".join(f"{labels[field]}: {', '.join(values)}" for field, values in filters.items())
 
 
+def _extract_days(normalized: str) -> int | None:
+    match = DAYS_RE.search(normalized)
+    if match:
+        return max(1, min(int(match.group(1)), 6))
+    if PROGRAM_WORD_RE.search(normalized):
+        return 3  # "programme" / "split" with no explicit day count
+    return None
+
+
+def _build_program(days_count: int, equipment: list[str] | None, exercises_by_lang: list[dict]) -> dict:
+    days = []
+    used_ids: set[str] = set()
+    for label in SPLIT_TEMPLATES[days_count]:
+        candidates: dict[str, dict] = {}
+        for day_filter in DAY_FILTERS[label]:
+            kwargs = dict(day_filter)
+            if equipment:
+                kwargs["equipment"] = equipment
+            for exercise in s.filter_exercises(exercises_by_lang, **kwargs):
+                candidates[exercise["id"]] = exercise
+
+        pool = [ex for ex in candidates.values() if ex["id"] not in used_ids] or list(candidates.values())
+        if not pool:
+            continue
+        chosen = random.sample(pool, min(EXERCISES_PER_DAY, len(pool)))
+        used_ids.update(ex["id"] for ex in chosen)
+        days.append(
+            {
+                "label": label,
+                "exercises": [
+                    {
+                        "exercise": exercise,
+                        "sets": DEFAULT_SETS,
+                        "reps": DEFAULT_REPS,
+                        "rest_seconds": DEFAULT_REST_SECONDS,
+                    }
+                    for exercise in chosen
+                ],
+            }
+        )
+    return {"days": days}
+
+
 def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
     normalized = _normalize(message)
     filters = _match_filters(normalized)
+    days_count = _extract_days(normalized)
+
+    if days_count:
+        exercises_by_lang = s.get_lang(s.load_exercises(), lang)
+        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang)
+        if not program["days"]:
+            return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
+        template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
+        return {"message": template.format(n=len(program["days"])), "exercises": [], "program": program}
 
     if not filters:
-        return {"message": NO_FILTER_MESSAGES.get(lang, NO_FILTER_MESSAGES["en"]), "exercises": []}
+        return {
+            "message": NO_FILTER_MESSAGES.get(lang, NO_FILTER_MESSAGES["en"]),
+            "exercises": [],
+            "program": None,
+        }
 
     exercises_by_lang = s.get_lang(s.load_exercises(), lang)
     matched = s.filter_exercises(exercises_by_lang, **filters)
 
     if not matched:
-        return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": []}
+        return {
+            "message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]),
+            "exercises": [],
+            "program": None,
+        }
 
     limit = _extract_limit(normalized)
     selected = random.sample(matched, min(limit, len(matched)))
@@ -184,4 +284,5 @@ def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
     return {
         "message": template.format(n=len(selected), desc=_describe_filters(filters, lang)),
         "exercises": selected,
+        "program": None,
     }
