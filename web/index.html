@@ -90,13 +90,7 @@
   <div id="log"></div>
   <div id="results"></div>
   <form id="chat-form">
-    <select id="lang">
-      <option value="fr" selected>FR</option>
-      <option value="en">EN</option>
-      <option value="es">ES</option>
-      <option value="it">IT</option>
-      <option value="de">DE</option>
-    </select>
+    <select id="lang"></select>
     <input id="message" type="text" placeholder="Ex : haut du corps avec haltères, 6 exercices" autocomplete="off" />
     <button type="submit">Envoyer</button>
   </form>
@@ -108,6 +102,23 @@
   const input = document.getElementById("message");
   const langSelect = document.getElementById("lang");
   const history = [];
+
+  (async function loadLanguages() {
+    try {
+      const res = await fetch("/api/languages");
+      const langs = await res.json();
+      langSelect.innerHTML = "";
+      for (const lang of langs) {
+        const opt = document.createElement("option");
+        opt.value = lang;
+        opt.textContent = lang.toUpperCase();
+        if (lang === "fr") opt.selected = true;
+        langSelect.appendChild(opt);
+      }
+    } catch (err) {
+      langSelect.innerHTML = '<option value="fr" selected>FR</option>';
+    }
+  })();
 
   function addBubble(role, text) {
     const div = document.createElement("div");

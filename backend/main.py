@@ -4,9 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+import scripting as s
 
 from .assistant import run_assistant
 
@@ -32,8 +34,15 @@ class ChatResponse(BaseModel):
     exercises: list[dict]
 
 
+@app.get("/api/languages")
+def languages() -> list[str]:
+    return s.list_languages()
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
+    if req.lang not in s.list_languages():
+        raise HTTPException(status_code=400, detail=f"Unsupported lang '{req.lang}'")
     result = run_assistant(req.message, [t.model_dump() for t in req.history], req.lang)
     return ChatResponse(**result)
 
