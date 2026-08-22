@@ -361,23 +361,33 @@ def _current_wizard_step(history: list[dict]) -> int | None:
     return _QUESTION_TEXT_TO_STEP.get((history[-1].get("text") or "").strip())
 
 
-def _collect_prior_wizard_answers(history: list[dict], answering_step: int) -> dict[int, str]:
+def _collect_prior_wizard_answers(history: list[dict], answering_step: int) -> tuple[dict[int, str], str]:
     """Walk backward from just before the question at `answering_step`,
     collecting the contiguous chain of (question, answer) pairs for the
     steps immediately preceding it. Stops at the first gap, so answers
-    from an earlier, already-finished wizard run can't leak into this one."""
+    from an earlier, already-finished wizard run can't leak into this one.
+
+    Also returns the original message that triggered this run (the user
+    turn immediately before question 0), since that's often where the user
+    actually stated something like "mixed"/"varied" - it's never itself one
+    of the wizard's numbered answers, so callers should treat it separately."""
     answers: dict[int, str] = {}
     step = answering_step
     i = len(history) - 2  # the answer to step `step - 1`, just before history[-1]
+    question_0_index = len(history) - 1  # index of the question for `answering_step`, updated as we walk back
     while step > 0 and i >= 1:
         user_turn, assistant_turn = history[i], history[i - 1]
         prev_step = _QUESTION_TEXT_TO_STEP.get((assistant_turn.get("text") or "").strip())
         if user_turn.get("role") != "user" or assistant_turn.get("role") != "assistant" or prev_step != step - 1:
             break
         answers[step - 1] = user_turn["text"]
+        question_0_index = i - 1
         step -= 1
         i -= 2
-    return answers
+    trigger_message = ""
+    if question_0_index > 0 and history[question_0_index - 1].get("role") == "user":
+        trigger_message = history[question_0_index - 1]["text"]
+    return answers, trigger_message
 
 
 def _has_enough_for_direct_program(normalized: str) -> bool:
@@ -387,7 +397,7 @@ def _has_enough_for_direct_program(normalized: str) -> bool:
     return bool(DAYS_RE.search(normalized)) and bool(_match_filters(normalized).get("equipment"))
 
 
-def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
+def _finalize_wizard(answers: dict[int, str], lang: str, trigger_message: str = "") -> dict:
     goal_text = answers.get(0, "")
     equipment_text = answers.get(1, "")
     days_text = answers.get(2, "")
@@ -398,7 +408,11 @@ def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
     days_count = max(1, min(int(days_match.group()), 6)) if days_match else 3
 
     exercises_by_lang = s.get_lang(s.load_exercises(), lang)
-    builder = _build_mixed_program if MIX_WORD_RE.search(_normalize(goal_text)) else _build_program
+    # "mixed" is usually stated in the message that triggered the wizard
+    # ("aide-moi à choisir un programme mixte") rather than in the answer to
+    # any specific question, so check both.
+    mix_signal = _normalize(f"{trigger_message} {goal_text}")
+    builder = _build_mixed_program if MIX_WORD_RE.search(mix_signal) else _build_program
     program = builder(days_count, equipment, exercises_by_lang, profile)
     if not program["days"]:
         return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
@@ -414,12 +428,12 @@ def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
     if answering_step is not None:
         # Mid-wizard: this message answers `answering_step` regardless of
         # its content (even if it coincidentally contains trigger words).
-        answers = _collect_prior_wizard_answers(history, answering_step)
+        answers, trigger_message = _collect_prior_wizard_answers(history, answering_step)
         answers[answering_step] = message
         next_step = answering_step + 1
         if next_step < len(questions):
             return {"message": questions[next_step], "exercises": [], "program": None}
-        return _finalize_wizard(answers, lang)
+        return _finalize_wizard(answers, lang, trigger_message)
 
     if WIZARD_TRIGGER_RE.search(normalized) and not _has_enough_for_direct_program(normalized):
         return {"message": questions[0], "exercises": [], "program": None}
