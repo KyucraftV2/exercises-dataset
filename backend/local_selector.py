@@ -169,6 +169,21 @@ DAY_FILTERS: dict[str, list[dict[str, list[str]]]] = {
     ],
 }
 
+# "Mix" split: unlike Push/Pull/Legs (one focus per day) or Full Body (the
+# same broad coverage every day), each day combines a different pair/trio of
+# muscle groups so no two days look alike. Cycled with `i % len(MIX_COMBOS)`
+# for however many days are requested.
+MIX_COMBOS: list[list[dict[str, list[str]]]] = [
+    [{"category": ["chest", "back"]}],
+    [{"category": ["upper legs", "lower legs"]}],
+    [{"category": ["shoulders", "upper arms", "lower arms"]}],
+    [{"category": ["back", "upper legs"]}],
+    [{"category": ["chest", "shoulders"]}],
+    [{"category": ["waist", "cardio"]}],
+]
+
+MIX_WORD_RE = re.compile(r"\bmix\b|\bmixte\b|\bmixtes\b|\bmelange\b|\bmelanges\b|\bvarie\b|\bvaries\b")
+
 EXERCISES_PER_DAY = 5
 DEFAULT_SETS = 3
 DEFAULT_REPS = "8-12"
@@ -265,8 +280,8 @@ def _extract_days(normalized: str) -> int | None:
     return None
 
 
-def _build_program(
-    days_count: int,
+def _build_program_from_specs(
+    day_specs: list[tuple[str, list[dict[str, list[str]]]]],
     equipment: list[str] | None,
     exercises_by_lang: list[dict],
     profile: dict | None = None,
@@ -274,9 +289,9 @@ def _build_program(
     profile = profile or DEFAULT_PROFILE
     days = []
     used_ids: set[str] = set()
-    for label in SPLIT_TEMPLATES[days_count]:
+    for label, day_filters in day_specs:
         candidates: dict[str, dict] = {}
-        for day_filter in DAY_FILTERS[label]:
+        for day_filter in day_filters:
             kwargs = dict(day_filter)
             if equipment:
                 kwargs["equipment"] = equipment
@@ -303,6 +318,26 @@ def _build_program(
             }
         )
     return {"days": days}
+
+
+def _build_program(
+    days_count: int,
+    equipment: list[str] | None,
+    exercises_by_lang: list[dict],
+    profile: dict | None = None,
+) -> dict:
+    specs = [(label, DAY_FILTERS[label]) for label in SPLIT_TEMPLATES[days_count]]
+    return _build_program_from_specs(specs, equipment, exercises_by_lang, profile)
+
+
+def _build_mixed_program(
+    days_count: int,
+    equipment: list[str] | None,
+    exercises_by_lang: list[dict],
+    profile: dict | None = None,
+) -> dict:
+    specs = [(f"Mix {i + 1}", MIX_COMBOS[i % len(MIX_COMBOS)]) for i in range(days_count)]
+    return _build_program_from_specs(specs, equipment, exercises_by_lang, profile)
 
 
 def _match_goal_profile(text: str) -> dict:
@@ -363,7 +398,8 @@ def _finalize_wizard(answers: dict[int, str], lang: str) -> dict:
     days_count = max(1, min(int(days_match.group()), 6)) if days_match else 3
 
     exercises_by_lang = s.get_lang(s.load_exercises(), lang)
-    program = _build_program(days_count, equipment, exercises_by_lang, profile)
+    builder = _build_mixed_program if MIX_WORD_RE.search(_normalize(goal_text)) else _build_program
+    program = builder(days_count, equipment, exercises_by_lang, profile)
     if not program["days"]:
         return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
     template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
@@ -394,7 +430,8 @@ def run_local_assistant(message: str, history: list[dict], lang: str) -> dict:
     if days_count:
         exercises_by_lang = s.get_lang(s.load_exercises(), lang)
         profile = _match_goal_profile(normalized)
-        program = _build_program(days_count, filters.get("equipment"), exercises_by_lang, profile)
+        builder = _build_mixed_program if MIX_WORD_RE.search(normalized) else _build_program
+        program = builder(days_count, filters.get("equipment"), exercises_by_lang, profile)
         if not program["days"]:
             return {"message": NO_MATCH_MESSAGES.get(lang, NO_MATCH_MESSAGES["en"]), "exercises": [], "program": None}
         template = PROGRAM_FOUND_TEMPLATES.get(lang, PROGRAM_FOUND_TEMPLATES["en"])
