@@ -302,6 +302,12 @@
     auth = null;
     saveAuth(null);
     currentPlan = null;
+    // Clear the plan DOM synchronously (not just via the async loadPlan() that
+    // showView("plan") triggers later) - otherwise a different user logging
+    // in on the same tab and opening "Mon planning" could briefly see the
+    // previous user's plan still rendered while their own GET /api/plan is
+    // still in flight.
+    renderPlanView();
     updateAuthUI();
     showView("chat");
   }
@@ -405,8 +411,9 @@
 
   function weekdayLabel(weekday, lang) {
     const labels = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.en;
-    if (!weekday) return lang === "fr" ? "Non planifié" : "Unscheduled";
-    return labels[weekday] || weekday;
+    const unscheduledLabel = lang === "fr" ? "Non planifié" : "Unscheduled";
+    if (!weekday) return unscheduledLabel;
+    return labels[weekday] || unscheduledLabel;
   }
 
   async function loadPlan() {
