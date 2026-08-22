@@ -331,9 +331,10 @@
         const res = await fetch(`/api/exercise/${id}?lang=${newLang}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const exercise = await res.json();
+        // stale if the modal moved on to another exercise, or the user
+        // picked yet another language before this fetch resolved
+        if (openId !== id || modalLang.value !== newLang) return;
         cacheExercise(exercise, newLang);
-        // the modal may since have been closed or switched to another exercise
-        if (openId !== id) return;
         fillModal(exercise);
       } catch (err) {
         // keep showing the previous language rather than a broken modal
