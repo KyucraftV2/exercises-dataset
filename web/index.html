@@ -293,6 +293,12 @@
   let auth = loadAuth(); // { token, username } | null
   let currentPlan = null; // { lang, days: [...] } | null
   let planBusy = false; // blocks overlapping plan mutations (swap/done/save/delete)
+  // Bumped on every clearAuth()/successful login. Every async plan call
+  // captures it before its await and checks it's unchanged after - a
+  // request started by a session that's since logged out (or been
+  // replaced by a different login) is discarded instead of applying its
+  // late-arriving result on top of whoever is signed in now.
+  let authGeneration = 0;
 
   function authHeaders() {
     return auth ? { Authorization: `Bearer ${auth.token}` } : {};
@@ -302,6 +308,7 @@
     auth = null;
     saveAuth(null);
     currentPlan = null;
+    authGeneration++;
     // Clear the plan DOM synchronously (not just via the async loadPlan() that
     // showView("plan") triggers later) - otherwise a different user logging
     // in on the same tab and opening "Mon planning" could briefly see the
@@ -352,6 +359,7 @@
       }
       auth = { token: data.token, username: data.username };
       saveAuth(auth);
+      authGeneration++;
       document.getElementById("auth-password").value = "";
       updateAuthUI();
     } catch (err) {
@@ -418,12 +426,18 @@
 
   async function loadPlan() {
     if (!auth) return;
+    const generation = authGeneration;
+    let plan;
     try {
       const res = await apiPlanFetch("/api/plan");
-      currentPlan = res.ok ? await res.json() : null;
+      plan = res.ok ? await res.json() : null;
     } catch (err) {
-      currentPlan = null;
+      plan = null;
     }
+    // discard a response that arrived after the session that started this
+    // request logged out or was replaced by a different login
+    if (generation !== authGeneration) return;
+    currentPlan = plan;
     renderPlanView();
   }
 
@@ -458,16 +472,20 @@
       e.stopPropagation();
       if (planBusy) return;
       planBusy = true;
+      const generation = authGeneration;
+      let updated = null;
       try {
         const res = await apiPlanFetch("/api/plan/exercise/swap", {
           method: "POST",
           body: JSON.stringify({ day_index: dayIdx, exercise_id: item.exercise.id }),
         });
-        if (res.ok) currentPlan = await res.json();
+        if (res.ok) updated = await res.json();
       } catch (err) {
         // keep the previous plan state on error
       }
       planBusy = false;
+      if (generation !== authGeneration) return; // session logged out/changed while this was in flight
+      if (updated) currentPlan = updated;
       renderPlanView();
     });
     card.appendChild(swapBtn);
@@ -484,16 +502,20 @@
         return;
       }
       planBusy = true;
+      const generation = authGeneration;
+      let updated = null;
       try {
         const res = await apiPlanFetch("/api/plan/exercise/done", {
           method: "PATCH",
           body: JSON.stringify({ day_index: dayIdx, exercise_id: item.exercise.id, done: checkbox.checked }),
         });
-        if (res.ok) currentPlan = await res.json();
+        if (res.ok) updated = await res.json();
       } catch (err) {
         // keep the previous plan state on error
       }
       planBusy = false;
+      if (generation !== authGeneration) return; // session logged out/changed while this was in flight
+      if (updated) currentPlan = updated;
       renderPlanView();
     });
     doneWrap.appendChild(checkbox);
@@ -553,13 +575,17 @@
     deleteBtn.addEventListener("click", async () => {
       if (planBusy) return;
       planBusy = true;
+      const generation = authGeneration;
+      let deleted = false;
       try {
-        await apiPlanFetch("/api/plan", { method: "DELETE" });
-        currentPlan = null;
+        const res = await apiPlanFetch("/api/plan", { method: "DELETE" });
+        deleted = res.ok;
       } catch (err) {
-        // ignore - plan re-renders from whatever currentPlan still holds
+        // deleted stays false - plan re-renders from whatever currentPlan still holds
       }
       planBusy = false;
+      if (generation !== authGeneration) return; // session logged out/changed while this was in flight
+      if (deleted) currentPlan = null;
       renderPlanView();
     });
     container.appendChild(deleteBtn);
@@ -608,6 +634,7 @@
     saveBtn.addEventListener("click", async () => {
       saveBtn.disabled = true;
       errorEl.textContent = "";
+      const generation = authGeneration;
       const days = program.days.map((day, i) => ({
         weekday: selects[i].value || null,
         label: day.label,
@@ -621,6 +648,10 @@
       }));
       try {
         const res = await apiPlanFetch("/api/plan", { method: "PUT", body: JSON.stringify({ lang, days }) });
+        // session logged out/changed while this was in flight - drop the
+        // result rather than switching the (now different, or logged-out)
+        // session over to the plan view
+        if (generation !== authGeneration) return;
         if (res.ok) {
           currentPlan = await res.json();
           showView("plan");
