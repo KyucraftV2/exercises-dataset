@@ -28,6 +28,17 @@
   }
   header h1 { margin: 0; font-size: 1.15rem; }
   header p { margin: .25rem 0 0; color: var(--muted); font-size: .85rem; }
+  #mode-badge {
+    display: inline-block;
+    margin-top: .5rem;
+    padding: .15rem .55rem;
+    border-radius: 1rem;
+    font-size: .72rem;
+    font-weight: 600;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
   main {
     max-width: 900px;
     margin: 0 auto;
@@ -85,6 +96,7 @@
 <header>
   <h1>🏋️ Sélecteur d'exercices IA</h1>
   <p>Décris ce que tu veux travailler (matériel disponible, muscles, objectif) — l'assistant filtre les 1 324 exercices du dataset pour toi.</p>
+  <span id="mode-badge"></span>
 </header>
 <main>
   <div id="log"></div>
@@ -102,20 +114,31 @@
   const input = document.getElementById("message");
   const langSelect = document.getElementById("lang");
   const history = [];
+  const modeBadge = document.getElementById("mode-badge");
 
-  (async function loadLanguages() {
+  // Language options come from /api/mode, not /api/languages: the local
+  // (no-API) mode only understands a couple of languages even though the
+  // dataset itself has instructions in ten - offering the rest would let
+  // the user pick a language that silently never matches anything.
+  (async function loadModeAndLanguages() {
     try {
-      const res = await fetch("/api/languages");
-      const langs = await res.json();
+      const res = await fetch("/api/mode");
+      const data = await res.json();
+      modeBadge.textContent = data.mode === "claude" ? "mode Claude" : "mode local (sans API)";
+
       langSelect.innerHTML = "";
-      for (const lang of langs) {
+      for (const lang of data.supported_langs) {
         const opt = document.createElement("option");
         opt.value = lang;
         opt.textContent = lang.toUpperCase();
         if (lang === "fr") opt.selected = true;
         langSelect.appendChild(opt);
       }
+      if (!langSelect.value && langSelect.options.length) {
+        langSelect.options[0].selected = true;
+      }
     } catch (err) {
+      modeBadge.textContent = "";
       langSelect.innerHTML = '<option value="fr" selected>FR</option>';
     }
   })();

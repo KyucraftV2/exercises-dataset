@@ -105,13 +105,20 @@ A step-by-step guide for integrating the dataset into your own application:
 
 A small FastAPI backend (`backend/`) plus a chat frontend (`web/`) that let you describe a
 workout in plain language (equipment available, muscles to train, goal) and get back a
-selection of real exercises from this dataset — picked by Claude using tool calls constrained
-to the dataset's actual equipment/category/target/muscle_group values, so it can't invent
-exercises that don't exist here.
+selection of real exercises from this dataset. Two selection modes, switched with `AI_MODE`:
+
+- **`local`** (default, no API key needed) — a keyword-based matcher
+  (`backend/local_selector.py`) maps French/English terms ("pectoraux", "dumbbells"...) straight
+  onto `scripting.filter_exercises`. Fast, free, but only understands the phrasing in its keyword
+  table.
+- **`claude`** — Claude picks exercises via tool calls constrained to the dataset's actual
+  equipment/category/target/muscle_group values (`backend/assistant.py`), so it can't invent
+  exercises that don't exist here. Handles free-form requests the local mode can't, but needs an
+  `ANTHROPIC_API_KEY`.
 
 ```bash
 pip install -r backend/requirements.txt
-cp .env.example .env   # add your ANTHROPIC_API_KEY
+cp .env.example .env   # AI_MODE=local works out of the box; set AI_MODE=claude + ANTHROPIC_API_KEY to use Claude instead
 uvicorn backend.main:app --reload
 # open http://127.0.0.1:8000
 ```
