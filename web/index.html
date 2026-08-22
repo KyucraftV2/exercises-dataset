@@ -81,23 +81,47 @@
     gap: .8rem;
   }
   .card {
-    display: block;
-    width: 100%;
+    position: relative;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: .7rem;
     overflow: hidden;
+  }
+  .card-body {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: none;
     cursor: pointer;
     text-align: left;
     padding: 0;
     font: inherit;
     color: inherit;
   }
-  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #000; }
-  .card .info { padding: .5rem .6rem; }
-  .card .name { font-size: .85rem; font-weight: 600; margin: 0 0 .25rem; }
-  .card .tags { font-size: .72rem; color: var(--muted); }
-  .card .meta { font-size: .72rem; color: var(--accent); margin: .25rem 0 0; font-weight: 600; }
+  .card-body img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #000; }
+  .card-body .info { padding: .5rem .6rem; }
+  .card-body .name { font-size: .85rem; font-weight: 600; margin: 0 0 .25rem; }
+  .card-body .tags { font-size: .72rem; color: var(--muted); }
+  .card-body .meta { font-size: .72rem; color: var(--accent); margin: .25rem 0 0; font-weight: 600; }
+  .swap-btn {
+    position: absolute;
+    top: .35rem;
+    right: .35rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, .55);
+    border: none;
+    color: white;
+    font-size: .95rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .swap-btn:disabled { opacity: .5; cursor: default; }
   #program { display: flex; flex-direction: column; gap: 1.2rem; }
   .day h3 { margin: 0 0 .5rem; font-size: .95rem; }
   .day .grid {
@@ -227,50 +251,113 @@
     exerciseCache.set(ex.id, { lang, data: ex });
   }
 
-  function makeCard(ex, lang, meta) {
-    const card = document.createElement("button");
-    card.type = "button";
+  let currentExercises = [];
+  let currentProgram = null;
+  // scope key ("results" or "day-N") -> mid-swap. Blocks a second swap in
+  // the same grid/day from starting until the first has fully resolved and
+  // re-rendered, so two concurrent requests can never both pick the same
+  // replacement (each fetch's `exclude` list is also recomputed live from
+  // current state at click time, not a snapshot from when the grid was
+  // last rendered).
+  const swappingScopes = new Set();
+
+  function siblingIdsFor(scopeKey) {
+    if (scopeKey === "results") return currentExercises.map((e) => e.id);
+    const dayIdx = Number(scopeKey.slice(4));
+    return currentProgram.days[dayIdx].exercises.map((item) => item.exercise.id);
+  }
+
+  function makeCard(ex, lang, meta, scopeKey, onSwap) {
+    const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `
+
+    const body = document.createElement("button");
+    body.type = "button";
+    body.className = "card-body";
+    body.innerHTML = `
       <img src="${ex.gif_url}" alt="${ex.name}" loading="lazy" />
       <div class="info">
         <p class="name">${ex.name}</p>
         <p class="tags">${ex.equipment} · ${ex.category} · ${ex.target}</p>
         ${meta ? `<p class="meta">${meta}</p>` : ""}
       </div>`;
-    card.addEventListener("click", () => {
+    body.addEventListener("click", () => {
       cacheExercise(ex, lang);
       openModal(ex.id);
     });
+    card.appendChild(body);
+
+    const swapBtn = document.createElement("button");
+    swapBtn.type = "button";
+    swapBtn.className = "swap-btn";
+    swapBtn.title = lang === "fr" ? "Remplacer" : "Swap";
+    swapBtn.textContent = "⟲";
+    swapBtn.disabled = swappingScopes.has(scopeKey);
+    swapBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (swappingScopes.has(scopeKey)) return;
+      swappingScopes.add(scopeKey);
+      swapBtn.disabled = true;
+      try {
+        const exclude = siblingIdsFor(scopeKey)
+          .filter((id) => id !== ex.id)
+          .join(",");
+        const res = await fetch(`/api/exercise/${ex.id}/alternative?lang=${lang}&exclude=${exclude}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const alt = await res.json();
+        // clear before onSwap's re-render so the freshly built buttons for
+        // this scope come back enabled instead of permanently stuck
+        swappingScopes.delete(scopeKey);
+        onSwap(alt);
+      } catch (err) {
+        swappingScopes.delete(scopeKey);
+        swapBtn.disabled = false;
+      }
+    });
+    card.appendChild(swapBtn);
+
     return card;
   }
 
   function renderResults(exercises, lang) {
+    currentExercises = exercises;
     results.innerHTML = "";
-    for (const ex of exercises) {
+    exercises.forEach((ex, i) => {
       cacheExercise(ex, lang);
-      results.appendChild(makeCard(ex, lang, null));
-    }
+      results.appendChild(
+        makeCard(ex, lang, null, "results", (alt) => {
+          currentExercises[i] = alt;
+          renderResults(currentExercises, lang);
+        })
+      );
+    });
   }
 
   function renderProgram(program, lang) {
+    currentProgram = program;
     programEl.innerHTML = "";
     const restLabel = lang === "fr" ? "repos" : "rest";
-    for (const day of program.days) {
+    program.days.forEach((day, dayIdx) => {
       const section = document.createElement("div");
       section.className = "day";
       const grid = document.createElement("div");
       grid.className = "grid";
-      for (const item of day.exercises) {
+      const scopeKey = `day-${dayIdx}`;
+      day.exercises.forEach((item, itemIdx) => {
         const meta = `${item.sets} × ${item.reps} · ${restLabel} ${item.rest_seconds}s`;
-        grid.appendChild(makeCard(item.exercise, lang, meta));
-      }
+        grid.appendChild(
+          makeCard(item.exercise, lang, meta, scopeKey, (alt) => {
+            currentProgram.days[dayIdx].exercises[itemIdx].exercise = alt;
+            renderProgram(currentProgram, lang);
+          })
+        );
+      });
       const h3 = document.createElement("h3");
       h3.textContent = day.label;
       section.appendChild(h3);
       section.appendChild(grid);
       programEl.appendChild(section);
-    }
+    });
   }
 
   function renderSteps(exercise) {

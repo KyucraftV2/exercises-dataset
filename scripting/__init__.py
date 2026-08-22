@@ -15,6 +15,7 @@ from .filters import (
     filter_by_muscle_group,
     filter_by_category,
     filter_by_target,
+    find_alternative,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "filter_by_muscle_group",
     "filter_by_category",
     "filter_by_target",
+    "find_alternative",
 ]
