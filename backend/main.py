@@ -32,11 +32,22 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: str
     exercises: list[dict]
+    program: dict | None = None
 
 
 @app.get("/api/languages")
 def languages() -> list[str]:
     return s.list_languages()
+
+
+@app.get("/api/exercise/{exercise_id}")
+def get_exercise(exercise_id: str, lang: str = "fr") -> dict:
+    if lang not in s.list_languages():
+        raise HTTPException(status_code=400, detail=f"Unsupported lang '{lang}'")
+    exercise = s.get_exercise_by_id(exercise_id, lang)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail=f"No exercise with id '{exercise_id}'")
+    return exercise
 
 
 @app.get("/api/mode")
