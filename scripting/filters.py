@@ -25,8 +25,8 @@ def filter_exercises(
     """Apply every provided filter as an AND. Each filter accepts a list of
     acceptable values so the caller can widen a single criterion.
 
-    `category` doubles as body-part filtering: in this dataset `category`
-    and `body_part` always hold the same value (see data/exercises.schema.json)."""
+    There is no separate body-part filter: `category` and the dataset's
+    `body_part` field always hold the same value, so `category` covers both."""
     result = exercises
     if equipment:
         result = filter_by_equipment(result, equipment)
