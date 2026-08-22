@@ -123,6 +123,16 @@ uvicorn backend.main:app --reload
 # open http://127.0.0.1:8000
 ```
 
+Besides a flat selection, you can ask for a multi-day **program** ("programme sur 3 jours avec
+haltères", "4 day program"): both modes return exercises grouped into days with suggested
+sets/reps/rest — Claude reasons about the split and the numbers itself (`submit_program` tool in
+`backend/assistant.py`), while the local mode picks from a small fixed split library
+(Push/Pull/Legs, Upper/Lower, Full Body) with fixed 3x8-12/90s defaults.
+
+Click any exercise card (flat or inside a program) to see its full step-by-step instructions in a
+modal, with its own language switch — it calls `GET /api/exercise/{id}?lang=..` and works in any
+of the dataset's 10 languages regardless of which mode/language the chat itself is using.
+
 The filtering logic itself lives in `scripting/` (`scripting.filter_exercises`) and can be
 reused outside the AI assistant — see [Usage Examples](#-usage-examples).
 
