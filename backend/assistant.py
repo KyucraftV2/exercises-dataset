@@ -55,8 +55,25 @@ def _filter_tool_schema() -> dict:
                     "description": f"Max exercises to return, default {DEFAULT_LIMIT}",
                 },
             },
+            "additionalProperties": False,
         },
     }
+
+
+# Short "couldn't finish" fallback, one per dataset language, so the message
+# a rare loop-exhaustion returns still matches the conversation's language.
+FALLBACK_MESSAGES = {
+    "en": "I couldn't put together a consistent selection - could you clarify your request?",
+    "fr": "Je n'ai pas réussi à finaliser une sélection cohérente, peux-tu préciser ta demande ?",
+    "es": "No conseguí armar una selección coherente, ¿podrías precisar tu solicitud?",
+    "it": "Non sono riuscito a completare una selezione coerente: puoi precisare la richiesta?",
+    "tr": "Tutarlı bir seçki oluşturamadım, isteğini biraz daha netleştirebilir misin?",
+    "ru": "Не удалось составить связную подборку — уточните, пожалуйста, запрос.",
+    "zh": "我没能整理出一份连贯的清单，能再说明一下你的需求吗？",
+    "hi": "मैं एक सुसंगत सूची तैयार नहीं कर पाया, क्या आप अपनी माँग स्पष्ट कर सकते हैं?",
+    "pl": "Nie udało mi się dobrać spójnego zestawu - czy możesz doprecyzować prośbę?",
+    "ko": "일관된 목록을 만들지 못했어요. 요청을 좀 더 구체적으로 말씀해 주시겠어요?",
+}
 
 
 def _summarize(exercise: dict) -> dict:
@@ -122,7 +139,18 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
                 continue
             args = dict(block["input"])
             limit = args.pop("limit", DEFAULT_LIMIT)
-            matched = s.filter_exercises(exercises_by_lang, **args)
+            try:
+                matched = s.filter_exercises(exercises_by_lang, **args)
+            except TypeError as exc:
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block["id"],
+                        "content": json.dumps({"error": str(exc)}),
+                        "is_error": True,
+                    }
+                )
+                continue
             for exercise in matched[:limit]:
                 selected[exercise["id"]] = exercise
             tool_results.append(
@@ -140,9 +168,6 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
         messages.append({"role": "user", "content": tool_results})
 
     return {
-        "message": (
-            "Je n'ai pas réussi à finaliser une sélection cohérente, "
-            "peux-tu préciser ta demande ?"
-        ),
+        "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
         "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
     }
