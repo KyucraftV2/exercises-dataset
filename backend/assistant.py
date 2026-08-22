@@ -171,7 +171,16 @@ def _system_prompt(lang: str) -> str:
         "For a multi-day program/split, once you've gathered exercises for every "
         "day, call submit_program with one entry per day (a label plus its "
         "exercises, each with sets/reps/rest you choose) instead of replying with "
-        f"plain text - put the day labels and the 'message' field in language '{lang}'."
+        f"plain text - put the day labels and the 'message' field in language '{lang}'.\n\n"
+        "If the user explicitly asks for help figuring out what to do (e.g. 'aide-moi "
+        "à choisir un programme', 'I don't know what program to do', 'what should I "
+        "train?') instead of already describing one, don't call any tool yet - ask 1 "
+        "to 3 short clarifying questions first (goal, equipment available, days per "
+        f"week, experience level - whatever is missing), in language '{lang}'. Once "
+        "they've answered enough of that, build the program as usual. If the user's "
+        "very first message already gives you enough to work with (equipment and/or "
+        "a body part/goal), skip the questions and just build the selection or "
+        "program directly - only ask when they're actually asking for guidance."
     )
 
 
