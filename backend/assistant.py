@@ -185,7 +185,14 @@ def _system_prompt(lang: str) -> str:
         "they've answered enough of that, build the program as usual. If the user's "
         "very first message already gives you enough to work with (equipment and/or "
         "a body part/goal), skip the questions and just build the selection or "
-        "program directly - only ask when they're actually asking for guidance."
+        "program directly - only ask when they're actually asking for guidance.\n\n"
+        "If the user states or implies an experience level (beginner/intermediate/"
+        "advanced), use it as a heuristic, not a real per-exercise difficulty rating "
+        "- the dataset has none. Adjust the sets/reps/rest you pick in submit_program "
+        "accordingly (e.g. lower volume and longer rest for a beginner, more for "
+        "advanced), and for a beginner who hasn't specified equipment, prefer simpler "
+        "movements (bodyweight/dumbbell/machine) over more technical barbell lifts "
+        "unless they specifically ask for those."
     )
 
 
