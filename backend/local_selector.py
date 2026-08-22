@@ -17,6 +17,11 @@ import scripting as s
 DEFAULT_LIMIT = 6
 MAX_LIMIT = 12
 
+# Languages this heuristic matcher actually understands. The other dataset
+# languages (see scripting.list_languages) still work for get_lang/instructions,
+# but the matcher and its reply templates only cover these two.
+SUPPORTED_LANGS = ("en", "fr")
+
 # keyword (singular, no accents) -> (filter field, values matched as OR).
 # A trailing "s?" is appended automatically, so plurals don't need their own entry.
 SYNONYMS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -139,10 +144,18 @@ def _extract_limit(normalized: str) -> int:
     return max(1, min(int(match.group()), MAX_LIMIT))
 
 
+def _keyword_pattern(keyword: str) -> re.Pattern:
+    # Only offer an optional trailing "s" when the keyword doesn't already
+    # end in one - otherwise e.g. "bras" (French, invariable in plural)
+    # would also match the unrelated English word "brass".
+    suffix = "" if keyword.endswith("s") else "s?"
+    return re.compile(r"\b" + re.escape(keyword) + suffix + r"\b")
+
+
 def _match_filters(normalized: str) -> dict[str, list[str]]:
     matched: dict[str, set[str]] = {"equipment": set(), "category": set(), "target": set(), "muscle_group": set()}
     for keyword, (field, values) in SYNONYMS.items():
-        if re.search(r"\b" + re.escape(keyword) + r"s?\b", normalized):
+        if _keyword_pattern(keyword).search(normalized):
             matched[field].update(values)
     return {field: sorted(values) for field, values in matched.items() if values}
 
