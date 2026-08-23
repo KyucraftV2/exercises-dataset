@@ -656,10 +656,14 @@
   // every request - this just asks it who (if anyone) that cookie belongs
   // to, to restore the logged-in UI after a page reload.
   (async function restoreSession() {
+    const generation = authGeneration;
     try {
       const res = await fetch("/api/auth/me", { credentials: "same-origin" });
       if (res.ok) {
         const data = await res.json();
+        // a real logout (or a different login) may have landed while this
+        // was in flight - don't resurrect a "logged in" UI over it
+        if (generation !== authGeneration) return;
         auth = { username: data.username };
         updateAuthUI();
       }
