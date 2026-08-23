@@ -1,7 +1,20 @@
-import pytest
-from fastapi.testclient import TestClient
+import tempfile
+from pathlib import Path
 
-from backend import main, storage
+import pytest
+
+from backend import storage
+
+# backend.main runs storage.init_db() at import time, against whatever
+# storage.DB_PATH is at that moment - which, without this, would be the
+# real backend/app.db (a developer's actual local database) the instant
+# pytest collects this file, before any per-test fixture below gets a
+# chance to redirect it. Point it at a throwaway file first so importing
+# `main` next never touches real state.
+storage.DB_PATH = Path(tempfile.mkdtemp()) / "conftest-import.db"
+
+from backend import main  # noqa: E402 (must come after the DB_PATH redirect above)
+from fastapi.testclient import TestClient  # noqa: E402
 
 CSRF_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
