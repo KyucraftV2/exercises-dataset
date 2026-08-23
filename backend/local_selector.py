@@ -4,7 +4,7 @@ This is a deliberately simple heuristic: it normalizes the user's message,
 looks up known French/English keywords (equipment, body part, target
 muscle...) against the dataset's real values, and calls
 `scripting.filter_exercises` directly. It won't understand phrasing the
-keyword table doesn't cover - see `backend.assistant` for the Claude-backed
+keyword table doesn't cover - see `backend.groq_assistant` for the Groq-backed
 mode, which handles free-form requests instead of fixed keywords.
 
 If the message asks for help figuring out a program (rather than already

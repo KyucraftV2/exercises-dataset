@@ -111,14 +111,14 @@ selection of real exercises from this dataset. Two selection modes, switched wit
   (`backend/local_selector.py`) maps French/English terms ("pectoraux", "dumbbells"...) straight
   onto `scripting.filter_exercises`. Fast, free, but only understands the phrasing in its keyword
   table.
-- **`claude`** — Claude picks exercises via tool calls constrained to the dataset's actual
-  equipment/category/target/muscle_group values (`backend/assistant.py`), so it can't invent
-  exercises that don't exist here. Handles free-form requests the local mode can't, but needs an
-  `ANTHROPIC_API_KEY`.
+- **`groq`** — an LLM (`openai/gpt-oss-120b` by default) picks exercises via tool calls
+  constrained to the dataset's actual equipment/category/target/muscle_group values
+  (`backend/groq_assistant.py`), so it can't invent exercises that don't exist here. Handles
+  free-form requests the local mode can't, but needs a `GROQ_API_KEY`.
 
 ```bash
 pip install -r backend/requirements.txt
-cp .env.example .env   # AI_MODE=local works out of the box; set AI_MODE=claude + ANTHROPIC_API_KEY to use Claude instead
+cp .env.example .env   # AI_MODE=local works out of the box; set AI_MODE=groq + GROQ_API_KEY to use the LLM mode instead
 uvicorn backend.main:app --reload
 # open http://127.0.0.1:8000
 ```
@@ -129,8 +129,8 @@ secure context, but a real deployment must be served over HTTPS or the cookie wo
 
 Besides a flat selection, you can ask for a multi-day **program** ("programme sur 3 jours avec
 haltères", "4 day program"): both modes return exercises grouped into days with suggested
-sets/reps/rest — Claude reasons about the split and the numbers itself (`submit_program` tool in
-`backend/assistant.py`), while the local mode picks from a small fixed split library
+sets/reps/rest — the `groq` mode reasons about the split and the numbers itself (`submit_program`
+tool in `backend/groq_assistant.py`), while the local mode picks from a small fixed split library
 (Push/Pull/Legs, Upper/Lower, Full Body) with fixed 3x8-12/90s defaults.
 
 Click any exercise card (flat or inside a program) to see its full step-by-step instructions in a
@@ -142,7 +142,7 @@ reused outside the AI assistant — see [Usage Examples](#-usage-examples).
 
 **Tests** (`backend/tests/`) cover auth, session storage, plan CRUD, rate limiting, and the API's
 cookie/CSRF flow. They always run against `AI_MODE=local` regardless of your `.env`, so no
-`ANTHROPIC_API_KEY`/network access is needed and no run ever calls the paid Claude API:
+`GROQ_API_KEY`/network access is needed and no run ever calls the paid Groq API:
 
 ```bash
 pip install -r backend/requirements-dev.txt

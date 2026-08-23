@@ -21,9 +21,9 @@ CSRF_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
 @pytest.fixture(autouse=True)
 def force_local_ai_mode(monkeypatch):
-    """AI_MODE=claude (with a real ANTHROPIC_API_KEY) may be set in a
-    developer's local .env - never let a test suite run hit the paid Claude
-    API. local mode needs no API key and no network access."""
+    """AI_MODE=groq (with a real GROQ_API_KEY) may be set in a developer's
+    local .env - never let a test suite run hit the paid Groq API. local
+    mode needs no API key and no network access."""
     monkeypatch.setenv("AI_MODE", "local")
 
 
