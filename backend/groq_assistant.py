@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 
-from groq import Groq
+from groq import Groq, GroqError
 
 import scripting as s
+
+logger = logging.getLogger(__name__)
 
 MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_TOOL_ITERATIONS = 8
@@ -243,77 +246,117 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
 
     selected: dict[str, dict] = {}
     tools = [_filter_tool_schema(), _submit_program_schema()]
+    fallback = {
+        "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
+        "exercises": [],
+        "program": None,
+    }
 
-    for _ in range(MAX_TOOL_ITERATIONS):
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=1536,
-            tools=tools,
-            messages=messages,
-        )
+    try:
+        for _ in range(MAX_TOOL_ITERATIONS):
+            response = client.chat.completions.create(
+                model=MODEL,
+                max_tokens=1536,
+                tools=tools,
+                messages=messages,
+            )
 
-        choice_message = response.choices[0].message
-        messages.append(choice_message.model_dump(exclude_none=True))
+            choice_message = response.choices[0].message
+            messages.append(choice_message.model_dump(exclude_none=True))
 
-        tool_calls = choice_message.tool_calls or []
-        program_call = next(
-            (tc for tc in tool_calls if tc.function.name == "submit_program"), None
-        )
-        if program_call is not None:
-            program_input = json.loads(program_call.function.arguments)
-            program = _build_program(program_input, by_id)
-            if not program["days"]:
+            tool_calls = choice_message.tool_calls or []
+            program_call = next(
+                (tc for tc in tool_calls if tc.function.name == "submit_program"), None
+            )
+            if program_call is not None:
+                program_input = json.loads(program_call.function.arguments)
+                program = _build_program(program_input, by_id)
+                if not program["days"]:
+                    return fallback
                 return {
-                    "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
+                    "message": program_input.get("message", ""),
                     "exercises": [],
+                    "program": program,
+                }
+
+            if not tool_calls:
+                return {
+                    "message": choice_message.content or "",
+                    "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
                     "program": None,
                 }
-            return {
-                "message": program_input.get("message", ""),
-                "exercises": [],
-                "program": program,
-            }
 
-        if not tool_calls:
-            return {
-                "message": choice_message.content or "",
-                "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
-                "program": None,
-            }
-
-        for tool_call in tool_calls:
-            if tool_call.function.name != "filter_exercises":
-                continue
-            args = json.loads(tool_call.function.arguments)
-            limit = args.pop("limit", DEFAULT_LIMIT)
-            try:
-                matched = s.filter_exercises(exercises_by_lang, **args)
-            except TypeError as exc:
+            for tool_call in tool_calls:
+                # Every tool_call the model made needs a matching "tool" reply
+                # before the next request, or the API rejects the whole
+                # conversation as malformed - so an unrecognized name (a
+                # hallucinated call outside the two tools we actually offer)
+                # still gets one, just an error one, instead of being
+                # silently dropped.
+                if tool_call.function.name != "filter_exercises":
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {"error": f"Unknown tool '{tool_call.function.name}'"}
+                            ),
+                        }
+                    )
+                    continue
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError as exc:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": f"Malformed arguments: {exc}"}),
+                        }
+                    )
+                    continue
+                limit = args.pop("limit", DEFAULT_LIMIT)
+                try:
+                    matched = s.filter_exercises(exercises_by_lang, **args)
+                except TypeError as exc:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"error": str(exc)}),
+                        }
+                    )
+                    continue
+                for exercise in matched[:limit]:
+                    selected[exercise["id"]] = exercise
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": json.dumps({"error": str(exc)}),
+                        "content": json.dumps(
+                            {
+                                "count": len(matched),
+                                "returned": [_summarize(ex) for ex in matched[:limit]],
+                            }
+                        ),
                     }
                 )
-                continue
-            for exercise in matched[:limit]:
-                selected[exercise["id"]] = exercise
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(
-                        {
-                            "count": len(matched),
-                            "returned": [_summarize(ex) for ex in matched[:limit]],
-                        }
-                    ),
-                }
-            )
+    except (GroqError, json.JSONDecodeError):
+        # A Groq API error (auth, rate limit, timeout, a malformed request we
+        # didn't anticipate...) or a truncated/invalid submit_program payload
+        # (e.g. the model's tool call got cut off by max_tokens) shouldn't
+        # surface as a raw 500 to the user - degrade to the same "couldn't
+        # finish" message a loop-exhaustion already returns, but keep the
+        # traceback in the server log so it's still debuggable.
+        logger.exception("Groq chat completion failed")
+        return {
+            "message": fallback["message"],
+            "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
+            "program": None,
+        }
 
     return {
-        "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
+        "message": fallback["message"],
         "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
         "program": None,
     }
