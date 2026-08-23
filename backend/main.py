@@ -157,8 +157,8 @@ class AuthResponse(BaseModel):
 def register(
     req: AuthRequest,
     response: Response,
-    _csrf: None = Depends(verify_csrf_header),
     _rate: None = Depends(require_register_rate_limit),
+    _csrf: None = Depends(verify_csrf_header),
 ) -> AuthResponse:
     if not auth.validate_username(req.username):
         raise HTTPException(
@@ -184,8 +184,8 @@ def register(
 def login(
     req: AuthRequest,
     response: Response,
-    _csrf: None = Depends(verify_csrf_header),
     _rate: None = Depends(require_login_rate_limit),
+    _csrf: None = Depends(verify_csrf_header),
 ) -> AuthResponse:
     token = storage.login(req.username, req.password)
     if token is None:
