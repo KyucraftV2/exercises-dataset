@@ -140,6 +140,15 @@ of the dataset's 10 languages regardless of which mode/language the chat itself 
 The filtering logic itself lives in `scripting/` (`scripting.filter_exercises`) and can be
 reused outside the AI assistant — see [Usage Examples](#-usage-examples).
 
+**Tests** (`backend/tests/`) cover auth, session storage, plan CRUD, rate limiting, and the API's
+cookie/CSRF flow. They always run against `AI_MODE=local` regardless of your `.env`, so no
+`ANTHROPIC_API_KEY`/network access is needed and no run ever calls the paid Claude API:
+
+```bash
+pip install -r backend/requirements-dev.txt
+pytest backend/tests/
+```
+
 ---
 
 ## 📂 File Structure
