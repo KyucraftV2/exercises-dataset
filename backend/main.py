@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -16,18 +16,43 @@ from .selector import get_mode, get_supported_langs, run_selector
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
 
+SESSION_COOKIE = "session"
+# Custom header a cross-site <form> submission can't attach and a cross-site
+# script can't add without triggering a CORS preflight our server won't
+# satisfy. Combined with SameSite=Strict on the session cookie, this covers
+# both session-riding CSRF and login CSRF (forcing a victim's browser to log
+# into an attacker-controlled account).
+CSRF_HEADER_VALUE = "XMLHttpRequest"
+
 storage.init_db()
 
 app = FastAPI(title="Exercises AI Selector")
 
 
-def get_current_username(authorization: str = Header(default="")) -> str:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-    username = storage.get_username_for_token(authorization.removeprefix("Bearer ").strip())
+def get_current_username(session: str | None = Cookie(default=None)) -> str:
+    if session is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    username = storage.get_username_for_token(session)
     if username is None:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return username
+
+
+def verify_csrf_header(x_requested_with: str = Header(default="")) -> None:
+    if x_requested_with != CSRF_HEADER_VALUE:
+        raise HTTPException(status_code=403, detail="Missing or invalid CSRF header")
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=int(storage.SESSION_TTL.total_seconds()),
+        path="/",
+    )
 
 
 class ChatTurn(BaseModel):
@@ -88,12 +113,13 @@ class AuthRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    token: str
     username: str
 
 
 @app.post("/api/auth/register", response_model=AuthResponse)
-def register(req: AuthRequest) -> AuthResponse:
+def register(
+    req: AuthRequest, response: Response, _csrf: None = Depends(verify_csrf_header)
+) -> AuthResponse:
     if not auth.validate_username(req.username):
         raise HTTPException(
             status_code=400,
@@ -110,22 +136,36 @@ def register(req: AuthRequest) -> AuthResponse:
         token = storage.create_user(req.username, req.password)
     except storage.UsernameTaken:
         raise HTTPException(status_code=409, detail="Username already taken")
-    return AuthResponse(token=token, username=req.username)
+    _set_session_cookie(response, token)
+    return AuthResponse(username=req.username)
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
-def login(req: AuthRequest) -> AuthResponse:
+def login(
+    req: AuthRequest, response: Response, _csrf: None = Depends(verify_csrf_header)
+) -> AuthResponse:
     token = storage.login(req.username, req.password)
     if token is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return AuthResponse(token=token, username=req.username)
+    _set_session_cookie(response, token)
+    return AuthResponse(username=req.username)
 
 
 @app.post("/api/auth/logout")
-def logout(authorization: str = Header(default="")) -> dict:
-    if authorization.startswith("Bearer "):
-        storage.logout(authorization.removeprefix("Bearer ").strip())
+def logout(
+    response: Response,
+    session: str | None = Cookie(default=None),
+    _csrf: None = Depends(verify_csrf_header),
+) -> dict:
+    if session:
+        storage.logout(session)
+    response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(username: str = Depends(get_current_username)) -> dict:
+    return {"username": username}
 
 
 class PlanExerciseIn(BaseModel):
@@ -169,7 +209,11 @@ def get_my_plan(lang: str | None = None, username: str = Depends(get_current_use
 
 
 @app.put("/api/plan")
-def put_my_plan(body: PlanIn, username: str = Depends(get_current_username)) -> dict:
+def put_my_plan(
+    body: PlanIn,
+    username: str = Depends(get_current_username),
+    _csrf: None = Depends(verify_csrf_header),
+) -> dict:
     if body.lang not in s.list_languages():
         raise HTTPException(status_code=400, detail=f"Unsupported lang '{body.lang}'")
     for day in body.days:
@@ -183,20 +227,30 @@ def put_my_plan(body: PlanIn, username: str = Depends(get_current_username)) -> 
 
 
 @app.delete("/api/plan")
-def delete_my_plan(username: str = Depends(get_current_username)) -> dict:
+def delete_my_plan(
+    username: str = Depends(get_current_username), _csrf: None = Depends(verify_csrf_header)
+) -> dict:
     storage.delete_plan(username)
     return {"ok": True}
 
 
 @app.patch("/api/plan/exercise/done")
-def mark_exercise_done(body: DoneRequest, username: str = Depends(get_current_username)) -> dict:
+def mark_exercise_done(
+    body: DoneRequest,
+    username: str = Depends(get_current_username),
+    _csrf: None = Depends(verify_csrf_header),
+) -> dict:
     if not plans.set_exercise_done(username, body.day_index, body.exercise_id, body.done):
         raise HTTPException(status_code=404, detail="Plan, day, or exercise not found")
     return plans.get_plan(username)
 
 
 @app.post("/api/plan/exercise/swap")
-def swap_plan_exercise(body: SwapRequest, username: str = Depends(get_current_username)) -> dict:
+def swap_plan_exercise(
+    body: SwapRequest,
+    username: str = Depends(get_current_username),
+    _csrf: None = Depends(verify_csrf_header),
+) -> dict:
     updated = plans.swap_exercise(username, body.day_index, body.exercise_id)
     if updated is None:
         raise HTTPException(

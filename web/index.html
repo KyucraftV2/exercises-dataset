@@ -270,27 +270,11 @@
   const modeBadge = document.getElementById("mode-badge");
 
   // --- Auth ---------------------------------------------------------
-  const AUTH_KEY = "exercises_auth";
+  // Session lives in an httpOnly cookie set by the server - JS never sees
+  // the token, only whether we're logged in (via /api/auth/me) and as whom.
+  const CSRF_HEADERS = { "X-Requested-With": "XMLHttpRequest" };
 
-  function loadAuth() {
-    try {
-      const raw = localStorage.getItem(AUTH_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  function saveAuth(value) {
-    try {
-      if (value) localStorage.setItem(AUTH_KEY, JSON.stringify(value));
-      else localStorage.removeItem(AUTH_KEY);
-    } catch (err) {
-      // localStorage unavailable (private mode, etc.) - auth just won't persist across reloads
-    }
-  }
-
-  let auth = loadAuth(); // { token, username } | null
+  let auth = null; // { username } | null - resolved from /api/auth/me on load
   let currentPlan = null; // { lang, days: [...] } | null
   let planBusy = false; // blocks overlapping plan mutations (swap/done/save/delete)
   // Bumped on every clearAuth()/successful login. Every async plan call
@@ -300,13 +284,8 @@
   // late-arriving result on top of whoever is signed in now.
   let authGeneration = 0;
 
-  function authHeaders() {
-    return auth ? { Authorization: `Bearer ${auth.token}` } : {};
-  }
-
   function clearAuth() {
     auth = null;
-    saveAuth(null);
     currentPlan = null;
     authGeneration++;
     // Clear the plan DOM synchronously (not just via the async loadPlan() that
@@ -322,7 +301,8 @@
   async function apiPlanFetch(path, options = {}) {
     const res = await fetch(path, {
       ...options,
-      headers: { "Content-Type": "application/json", ...authHeaders(), ...(options.headers || {}) },
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...CSRF_HEADERS, ...(options.headers || {}) },
     });
     if (res.status === 401) clearAuth();
     return res;
@@ -349,7 +329,8 @@
     try {
       const res = await fetch(path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", ...CSRF_HEADERS },
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
@@ -357,8 +338,7 @@
         authError.textContent = data.detail || "Erreur";
         return;
       }
-      auth = { token: data.token, username: data.username };
-      saveAuth(auth);
+      auth = { username: data.username };
       authGeneration++;
       document.getElementById("auth-password").value = "";
       updateAuthUI();
@@ -671,6 +651,22 @@
   }
 
   updateAuthUI();
+
+  // The session lives in an httpOnly cookie the server already validated on
+  // every request - this just asks it who (if anyone) that cookie belongs
+  // to, to restore the logged-in UI after a page reload.
+  (async function restoreSession() {
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "same-origin" });
+      if (res.ok) {
+        const data = await res.json();
+        auth = { username: data.username };
+        updateAuthUI();
+      }
+    } catch (err) {
+      // stay logged out - network error, nothing more to do here
+    }
+  })();
 
   // Language options come from /api/mode, not /api/languages: the local
   // (no-API) mode only understands a couple of languages even though the
