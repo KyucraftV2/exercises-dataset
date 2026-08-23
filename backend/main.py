@@ -19,8 +19,9 @@ WEB_DIR = REPO_ROOT / "web"
 
 SESSION_COOKIE = "session"
 
-# The chat endpoint costs real money per call (each hits the Claude API, up
-# to MAX_TOOL_ITERATIONS times) and is now login-gated, so it's rate limited
+# The chat endpoint costs real money per call in groq mode (each hits the
+# Groq API, up to MAX_TOOL_ITERATIONS times) and is now login-gated, so it's
+# rate limited
 # per user; login/register have no user identity yet, so per client IP.
 CHAT_RATE_LIMIT = RateLimiter(max_requests=20, window_seconds=600)  # 20 / 10 min per user
 LOGIN_RATE_LIMIT = RateLimiter(max_requests=10, window_seconds=300)  # 10 / 5 min per IP

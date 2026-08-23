@@ -449,7 +449,7 @@ updateAuthUI();
   try {
     const res = await fetch("/api/mode");
     const data = await res.json();
-    modeBadge.textContent = data.mode === "claude" ? "mode Claude" : "mode local (sans API)";
+    modeBadge.textContent = data.mode === "groq" ? "mode Groq" : "mode local (sans API)";
 
     langSelect.innerHTML = "";
     for (const lang of data.supported_langs) {

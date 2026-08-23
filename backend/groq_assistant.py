@@ -1,11 +1,11 @@
 import json
 import os
 
-from anthropic import Anthropic
+from groq import Groq
 
 import scripting as s
 
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_TOOL_ITERATIONS = 8
 DEFAULT_LIMIT = 6
 MAX_SELECTED_TOTAL = 12
@@ -15,113 +15,119 @@ DEFAULT_SETS = 3
 DEFAULT_REPS = "8-12"
 DEFAULT_REST_SECONDS = 90
 
-_client: Anthropic | None = None
+_client: Groq | None = None
 
 
-def _client_instance() -> Anthropic:
+def _client_instance() -> Groq:
     global _client
     if _client is None:
-        _client = Anthropic()
+        _client = Groq()
     return _client
 
 
 def _filter_tool_schema() -> dict:
     return {
-        "name": "filter_exercises",
-        "description": (
-            "Search the exercise database by any combination of equipment, target "
-            "muscle, muscle group and body-part category. Values inside one "
-            "parameter are combined with OR, different parameters are combined "
-            "with AND. Call this before recommending any exercise - never invent "
-            "exercises or values outside the given enums."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "equipment": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": s.list_equipment()},
+        "type": "function",
+        "function": {
+            "name": "filter_exercises",
+            "description": (
+                "Search the exercise database by any combination of equipment, target "
+                "muscle, muscle group and body-part category. Values inside one "
+                "parameter are combined with OR, different parameters are combined "
+                "with AND. Call this before recommending any exercise - never invent "
+                "exercises or values outside the given enums."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "equipment": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": s.list_equipment()},
+                    },
+                    "category": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": s.list_categories()},
+                        "description": "Body part, e.g. chest, back, upper legs",
+                    },
+                    "target": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": s.list_targets()},
+                    },
+                    "muscle_group": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": s.list_muscle_groups()},
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Max exercises to return, default {DEFAULT_LIMIT}",
+                    },
                 },
-                "category": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": s.list_categories()},
-                    "description": "Body part, e.g. chest, back, upper legs",
-                },
-                "target": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": s.list_targets()},
-                },
-                "muscle_group": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": s.list_muscle_groups()},
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": f"Max exercises to return, default {DEFAULT_LIMIT}",
-                },
+                "additionalProperties": False,
             },
-            "additionalProperties": False,
         },
     }
 
 
 def _submit_program_schema() -> dict:
     return {
-        "name": "submit_program",
-        "description": (
-            "Submit a finished multi-day training program. Only call this when the "
-            "user asked for a program/split across several days or sessions - for a "
-            "single flat exercise selection, just reply with text instead. Every "
-            "exercise_id must be one you saw in a previous filter_exercises result - "
-            "any id you didn't actually see will be silently dropped from the "
-            "program. Pick sets/reps/rest yourself using standard strength-training "
-            "practice - the dataset has no such data."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "Short reply introducing the program, shown to the user as text.",
-                },
-                "days": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "label": {
-                                "type": "string",
-                                "description": "e.g. 'Day 1 - Push', translated to the reply language",
-                            },
-                            "exercises": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "exercise_id": {"type": "string"},
-                                        "sets": {"type": "integer", "minimum": 1, "maximum": MAX_SETS},
-                                        "reps": {
-                                            "type": "string",
-                                            "description": "e.g. '8-12' or '30s'",
+        "type": "function",
+        "function": {
+            "name": "submit_program",
+            "description": (
+                "Submit a finished multi-day training program. Only call this when the "
+                "user asked for a program/split across several days or sessions - for a "
+                "single flat exercise selection, just reply with text instead. Every "
+                "exercise_id must be one you saw in a previous filter_exercises result - "
+                "any id you didn't actually see will be silently dropped from the "
+                "program. Pick sets/reps/rest yourself using standard strength-training "
+                "practice - the dataset has no such data."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Short reply introducing the program, shown to the user as text.",
+                    },
+                    "days": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "e.g. 'Day 1 - Push', translated to the reply language",
+                                },
+                                "exercises": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "exercise_id": {"type": "string"},
+                                            "sets": {"type": "integer", "minimum": 1, "maximum": MAX_SETS},
+                                            "reps": {
+                                                "type": "string",
+                                                "description": "e.g. '8-12' or '30s'",
+                                            },
+                                            "rest_seconds": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": MAX_REST_SECONDS,
+                                            },
                                         },
-                                        "rest_seconds": {
-                                            "type": "integer",
-                                            "minimum": 0,
-                                            "maximum": MAX_REST_SECONDS,
-                                        },
+                                        "required": ["exercise_id", "sets", "reps", "rest_seconds"],
+                                        "additionalProperties": False,
                                     },
-                                    "required": ["exercise_id", "sets", "reps", "rest_seconds"],
-                                    "additionalProperties": False,
                                 },
                             },
+                            "required": ["label", "exercises"],
+                            "additionalProperties": False,
                         },
-                        "required": ["label", "exercises"],
-                        "additionalProperties": False,
                     },
                 },
+                "required": ["message", "days"],
+                "additionalProperties": False,
             },
-            "required": ["message", "days"],
-            "additionalProperties": False,
         },
     }
 
@@ -231,30 +237,31 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
     by_id = {exercise["id"]: exercise for exercise in exercises_by_lang}
     client = _client_instance()
 
-    messages: list[dict] = [{"role": h["role"], "content": h["text"]} for h in history]
+    messages: list[dict] = [{"role": "system", "content": _system_prompt(lang)}]
+    messages += [{"role": h["role"], "content": h["text"]} for h in history]
     messages.append({"role": "user", "content": message})
 
     selected: dict[str, dict] = {}
     tools = [_filter_tool_schema(), _submit_program_schema()]
 
     for _ in range(MAX_TOOL_ITERATIONS):
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=MODEL,
             max_tokens=1536,
-            system=_system_prompt(lang),
             tools=tools,
             messages=messages,
         )
 
-        content_blocks = [block.model_dump() for block in response.content]
-        messages.append({"role": "assistant", "content": content_blocks})
+        choice_message = response.choices[0].message
+        messages.append(choice_message.model_dump(exclude_none=True))
 
-        program_block = next(
-            (b for b in content_blocks if b["type"] == "tool_use" and b["name"] == "submit_program"),
-            None,
+        tool_calls = choice_message.tool_calls or []
+        program_call = next(
+            (tc for tc in tool_calls if tc.function.name == "submit_program"), None
         )
-        if program_block is not None:
-            program = _build_program(program_block["input"], by_id)
+        if program_call is not None:
+            program_input = json.loads(program_call.function.arguments)
+            program = _build_program(program_input, by_id)
             if not program["days"]:
                 return {
                     "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
@@ -262,45 +269,40 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
                     "program": None,
                 }
             return {
-                "message": program_block["input"].get("message", ""),
+                "message": program_input.get("message", ""),
                 "exercises": [],
                 "program": program,
             }
 
-        if response.stop_reason != "tool_use":
-            final_text = "".join(
-                block["text"] for block in content_blocks if block["type"] == "text"
-            )
+        if not tool_calls:
             return {
-                "message": final_text,
+                "message": choice_message.content or "",
                 "exercises": list(selected.values())[:MAX_SELECTED_TOTAL],
                 "program": None,
             }
 
-        tool_results = []
-        for block in content_blocks:
-            if block["type"] != "tool_use" or block["name"] != "filter_exercises":
+        for tool_call in tool_calls:
+            if tool_call.function.name != "filter_exercises":
                 continue
-            args = dict(block["input"])
+            args = json.loads(tool_call.function.arguments)
             limit = args.pop("limit", DEFAULT_LIMIT)
             try:
                 matched = s.filter_exercises(exercises_by_lang, **args)
             except TypeError as exc:
-                tool_results.append(
+                messages.append(
                     {
-                        "type": "tool_result",
-                        "tool_use_id": block["id"],
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
                         "content": json.dumps({"error": str(exc)}),
-                        "is_error": True,
                     }
                 )
                 continue
             for exercise in matched[:limit]:
                 selected[exercise["id"]] = exercise
-            tool_results.append(
+            messages.append(
                 {
-                    "type": "tool_result",
-                    "tool_use_id": block["id"],
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
                     "content": json.dumps(
                         {
                             "count": len(matched),
@@ -309,7 +311,6 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
                     ),
                 }
             )
-        messages.append({"role": "user", "content": tool_results})
 
     return {
         "message": FALLBACK_MESSAGES.get(lang, FALLBACK_MESSAGES["en"]),
