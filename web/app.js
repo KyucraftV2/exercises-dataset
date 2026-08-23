@@ -618,10 +618,13 @@ async function loadAllLangs() {
   return allLangsPromise;
 }
 
+let modalReturnFocus = null; // element to refocus once the modal closes
+
 async function openModal(id) {
   const cached = exerciseCache.get(id);
   if (!cached) return;
   openId = id;
+  modalReturnFocus = document.activeElement;
   fillModal(cached.data);
 
   const modalLang = document.getElementById("modal-lang");
@@ -658,11 +661,34 @@ async function openModal(id) {
   };
 
   document.getElementById("modal-overlay").classList.remove("hidden");
+  document.getElementById("modal-close").focus();
 }
 
 function closeModal() {
   openId = null;
   document.getElementById("modal-overlay").classList.add("hidden");
+  // return focus to whatever opened the modal (a card, typically) rather
+  // than leaving it on a now-hidden element
+  if (modalReturnFocus && typeof modalReturnFocus.focus === "function") {
+    modalReturnFocus.focus();
+  }
+  modalReturnFocus = null;
+}
+
+function trapModalTab(e) {
+  const focusable = document
+    .getElementById("modal")
+    .querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
 }
 
 document.getElementById("modal-close").addEventListener("click", closeModal);
@@ -670,7 +696,9 @@ document.getElementById("modal-overlay").addEventListener("click", (e) => {
   if (e.target.id === "modal-overlay") closeModal();
 });
 document.addEventListener("keydown", (e) => {
+  if (document.getElementById("modal-overlay").classList.contains("hidden")) return;
   if (e.key === "Escape") closeModal();
+  else if (e.key === "Tab") trapModalTab(e);
 });
 
 form.addEventListener("submit", async (e) => {
