@@ -4,19 +4,56 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import scripting as s
 
 from . import auth, plans, storage
+from .ratelimit import RateLimiter
 from .selector import get_mode, get_supported_langs, run_selector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
 
 SESSION_COOKIE = "session"
+
+# The chat endpoint costs real money per call (each hits the Claude API, up
+# to MAX_TOOL_ITERATIONS times) and is now login-gated, so it's rate limited
+# per user; login/register have no user identity yet, so per client IP.
+CHAT_RATE_LIMIT = RateLimiter(max_requests=20, window_seconds=600)  # 20 / 10 min per user
+LOGIN_RATE_LIMIT = RateLimiter(max_requests=10, window_seconds=300)  # 10 / 5 min per IP
+REGISTER_RATE_LIMIT = RateLimiter(max_requests=5, window_seconds=3600)  # 5 / hour per IP
+
+
+def _client_ip(request: Request) -> str:
+    # No reverse-proxy header handling (X-Forwarded-For) - fine for a
+    # single-process deployment talked to directly; add trusted-proxy
+    # handling if this ever sits behind one.
+    return request.client.host if request.client else "unknown"
+
+
+class IpRateLimitDependency:
+    """FastAPI dependency: rejects with 429 once `limiter` denies the
+    calling IP. A class (not a closure) so each registered limiter carries
+    its own message without needing `functools.partial` gymnastics."""
+
+    def __init__(self, limiter: RateLimiter, message: str) -> None:
+        self._limiter = limiter
+        self._message = message
+
+    def __call__(self, request: Request) -> None:
+        if not self._limiter.allow(_client_ip(request)):
+            raise HTTPException(status_code=429, detail=self._message)
+
+
+require_login_rate_limit = IpRateLimitDependency(
+    LOGIN_RATE_LIMIT, "Too many login attempts - please wait a few minutes and try again"
+)
+require_register_rate_limit = IpRateLimitDependency(
+    REGISTER_RATE_LIMIT, "Too many registration attempts - please wait a while and try again"
+)
 # Custom header a cross-site <form> submission can't attach and a cross-site
 # script can't add without triggering a CORS preflight our server won't
 # satisfy. Combined with SameSite=Strict on the session cookie, this covers
@@ -118,7 +155,10 @@ class AuthResponse(BaseModel):
 
 @app.post("/api/auth/register", response_model=AuthResponse)
 def register(
-    req: AuthRequest, response: Response, _csrf: None = Depends(verify_csrf_header)
+    req: AuthRequest,
+    response: Response,
+    _csrf: None = Depends(verify_csrf_header),
+    _rate: None = Depends(require_register_rate_limit),
 ) -> AuthResponse:
     if not auth.validate_username(req.username):
         raise HTTPException(
@@ -142,7 +182,10 @@ def register(
 
 @app.post("/api/auth/login", response_model=AuthResponse)
 def login(
-    req: AuthRequest, response: Response, _csrf: None = Depends(verify_csrf_header)
+    req: AuthRequest,
+    response: Response,
+    _csrf: None = Depends(verify_csrf_header),
+    _rate: None = Depends(require_login_rate_limit),
 ) -> AuthResponse:
     token = storage.login(req.username, req.password)
     if token is None:
@@ -260,7 +303,15 @@ def swap_plan_exercise(
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(
+    req: ChatRequest,
+    username: str = Depends(get_current_username),
+    _csrf: None = Depends(verify_csrf_header),
+) -> ChatResponse:
+    if not CHAT_RATE_LIMIT.allow(username):
+        raise HTTPException(
+            status_code=429, detail="Too many chat requests - please slow down and try again shortly"
+        )
     if req.lang not in s.list_languages():
         raise HTTPException(status_code=400, detail=f"Unsupported lang '{req.lang}'")
     supported = get_supported_langs()

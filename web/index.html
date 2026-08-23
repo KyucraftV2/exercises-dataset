@@ -238,6 +238,7 @@
   <button type="button" id="nav-plan" class="nav-btn">Mon planning</button>
 </nav>
 <main id="chat-view">
+  <p id="chat-locked" class="plan-empty hidden">Connecte-toi pour utiliser l'assistant IA.</p>
   <div id="log"></div>
   <div id="results"></div>
   <div id="program"></div>
@@ -314,6 +315,10 @@
     document.getElementById("auth-logged").classList.toggle("hidden", !loggedIn);
     document.getElementById("view-nav").classList.toggle("hidden", !loggedIn);
     if (loggedIn) document.getElementById("auth-username-display").textContent = auth.username;
+    // The chat assistant now requires a login (its API calls cost real
+    // money) - hide the form and show an explanatory message instead.
+    document.getElementById("chat-locked").classList.toggle("hidden", loggedIn);
+    document.getElementById("chat-form").classList.toggle("hidden", !loggedIn);
   }
 
   async function doAuth(path) {
@@ -924,9 +929,17 @@
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", ...CSRF_HEADERS },
         body: JSON.stringify({ message, lang: requestLang, history }),
       });
+      if (res.status === 401) {
+        clearAuth();
+        throw new Error("Ta session a expiré, reconnecte-toi.");
+      }
+      if (res.status === 429) {
+        throw new Error("Trop de requêtes, attends un peu avant de réessayer.");
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       pending.textContent = data.message;
@@ -942,7 +955,11 @@
       history.push({ role: "user", text: message });
       history.push({ role: "assistant", text: data.message });
     } catch (err) {
-      pending.textContent = "Erreur : impossible de contacter l'assistant (" + err.message + ").";
+      // our own throws above (401/429) already carry a user-facing message;
+      // a raw fetch/network failure doesn't, so fall back to a generic one
+      pending.textContent = err instanceof TypeError
+        ? "Erreur : impossible de contacter l'assistant."
+        : err.message;
       pending.className = "msg assistant";
     } finally {
       form.querySelector("button").disabled = false;
