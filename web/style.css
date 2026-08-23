@@ -31,10 +31,12 @@
      amber of a hazard-tape/equipment-console readout. */
   --floor: #17130f;
   --panel: #221c16;
-  --panel-raised: #2b241b;
   --chalk: #ede7da;
   --iron: #9c9084;
-  --iron-dim: #4a4238;
+  /* >=3:1 against --floor (WCAG 1.4.11 UI-component contrast) - this draws
+     every card/input/panel border, so it needs to stay perceivable, not
+     just the text next to it. */
+  --iron-dim: #726757;
   --plate: #e8552e;
   --plate-hover: #f0602f;
   --tape: #e8b23d;
