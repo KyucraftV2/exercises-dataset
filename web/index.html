@@ -4,6 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sélecteur d'exercices IA</title>
+<meta name="description" content="Décris ton matériel, tes muscles à travailler ou ton objectif : l'assistant IA filtre 1 324 exercices (avec animation GIF et instructions) pour te construire une sélection ou un programme sur plusieurs jours." />
+<meta property="og:title" content="Sélecteur d'exercices IA" />
+<meta property="og:description" content="Décris ton matériel, tes muscles à travailler ou ton objectif : l'assistant IA filtre 1 324 exercices pour te construire une sélection ou un programme sur plusieurs jours." />
+<meta property="og:type" content="website" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -13,8 +17,8 @@
   <span id="mode-badge"></span>
   <div id="auth-bar">
     <form id="auth-form" class="auth-form">
-      <input id="auth-username" type="text" placeholder="pseudo" autocomplete="username" />
-      <input id="auth-password" type="password" placeholder="mot de passe" autocomplete="current-password" />
+      <input id="auth-username" type="text" placeholder="pseudo" aria-label="Pseudo" autocomplete="username" />
+      <input id="auth-password" type="password" placeholder="mot de passe" aria-label="Mot de passe" autocomplete="current-password" />
       <button type="submit" id="auth-login-btn">Se connecter</button>
       <button type="button" id="auth-register-btn">Créer un compte</button>
       <p class="auth-error" id="auth-error"></p>
@@ -35,8 +39,8 @@
   <div id="results"></div>
   <div id="program"></div>
   <form id="chat-form">
-    <select id="lang"></select>
-    <input id="message" type="text" placeholder="Ex : programme sur 3 jours avec haltères" autocomplete="off" />
+    <select id="lang" aria-label="Langue"></select>
+    <input id="message" type="text" placeholder="Ex : programme sur 3 jours avec haltères" aria-label="Message" autocomplete="off" />
     <button type="submit">Envoyer</button>
   </form>
 </main>
@@ -44,12 +48,12 @@
   <div id="plan-content"></div>
 </main>
 <div id="modal-overlay" class="hidden">
-  <div id="modal">
+  <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name">
     <button id="modal-close" aria-label="Fermer">&times;</button>
     <img id="modal-img" alt="" />
     <h2 id="modal-name"></h2>
     <p class="tags" id="modal-tags"></p>
-    <select id="modal-lang"></select>
+    <select id="modal-lang" aria-label="Langue des instructions"></select>
     <ol id="modal-steps"></ol>
   </div>
 </div>
