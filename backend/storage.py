@@ -1,12 +1,18 @@
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import auth
 
 DB_PATH = Path(__file__).resolve().parent / "app.db"
+
+# Sessions are valid for a fixed window from creation, not a sliding one -
+# simpler to reason about than extending on every request, and 7 days is a
+# reasonable balance for this app between security and not forcing frequent
+# re-logins.
+SESSION_TTL = timedelta(days=7)
 
 
 @contextmanager
@@ -37,7 +43,8 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 username TEXT NOT NULL REFERENCES users(username),
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
             )
             """
         )
@@ -51,10 +58,26 @@ def init_db() -> None:
             )
             """
         )
+        _migrate_sessions_expiry(conn)
+
+
+def _migrate_sessions_expiry(conn: sqlite3.Connection) -> None:
+    """Pre-existing local DBs may predate the expires_at column. Add it and
+    expire every session already on file rather than guessing a created_at +
+    TTL that doesn't reflect when they were actually issued - users just log
+    in again, which is a one-time inconvenience."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "expires_at" not in columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''")
+        conn.execute("DELETE FROM sessions")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _expires_at() -> str:
+    return (datetime.now(timezone.utc) + SESSION_TTL).isoformat()
 
 
 class UsernameTaken(Exception):
@@ -73,8 +96,8 @@ def create_user(username: str, password: str) -> str:
             raise UsernameTaken(username) from exc
         token = auth.generate_token()
         conn.execute(
-            "INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)",
-            (token, username, _now()),
+            "INSERT INTO sessions (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token, username, _now(), _expires_at()),
         )
         return token
 
@@ -95,8 +118,8 @@ def login(username: str, password: str) -> str | None:
             return None
         token = auth.generate_token()
         conn.execute(
-            "INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)",
-            (token, username, _now()),
+            "INSERT INTO sessions (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token, username, _now(), _expires_at()),
         )
         return token
 
@@ -108,8 +131,17 @@ def logout(token: str) -> None:
 
 def get_username_for_token(token: str) -> str | None:
     with _connect() as conn:
-        row = conn.execute("SELECT username FROM sessions WHERE token = ?", (token,)).fetchone()
-        return row["username"] if row else None
+        row = conn.execute(
+            "SELECT username, expires_at FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if row is None:
+            return None
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            # Lazily reap the expired session on the read path that found it,
+            # rather than running a separate cleanup job.
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            return None
+        return row["username"]
 
 
 def get_plan(username: str) -> dict | None:

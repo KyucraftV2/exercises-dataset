@@ -123,6 +123,10 @@ uvicorn backend.main:app --reload
 # open http://127.0.0.1:8000
 ```
 
+Login/register set a `Secure` session cookie, which normally requires HTTPS — this works over plain
+`http://127.0.0.1` or `http://localhost` because current browsers treat loopback addresses as a
+secure context, but a real deployment must be served over HTTPS or the cookie won't be set/sent.
+
 Besides a flat selection, you can ask for a multi-day **program** ("programme sur 3 jours avec
 haltères", "4 day program"): both modes return exercises grouped into days with suggested
 sets/reps/rest — Claude reasons about the split and the numbers itself (`submit_program` tool in
