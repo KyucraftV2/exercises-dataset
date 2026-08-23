@@ -668,8 +668,10 @@ function closeModal() {
   openId = null;
   document.getElementById("modal-overlay").classList.add("hidden");
   // return focus to whatever opened the modal (a card, typically) rather
-  // than leaving it on a now-hidden element
-  if (modalReturnFocus && typeof modalReturnFocus.focus === "function") {
+  // than leaving it on a now-hidden element - but that card may have been
+  // removed from the DOM in the meantime (e.g. a chat response re-rendered
+  // the results grid while the modal was open), so check it's still there
+  if (modalReturnFocus && document.body.contains(modalReturnFocus)) {
     modalReturnFocus.focus();
   }
   modalReturnFocus = null;
