@@ -66,6 +66,27 @@ storage.init_db()
 app = FastAPI(title="Exercises AI Selector")
 
 
+# The whole frontend is now self-hosted with no inline <script>/<style> (see
+# web/app.js, web/style.css) and no third-party assets, so the policy can be
+# this strict without breaking anything.
+_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
+    "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+    "frame-ancestors 'none'; form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = _CSP
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    return response
+
+
 def get_current_username(session: str | None = Cookie(default=None)) -> str:
     if session is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
