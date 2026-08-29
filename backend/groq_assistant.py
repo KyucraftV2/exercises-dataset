@@ -9,7 +9,7 @@ import scripting as s
 logger = logging.getLogger(__name__)
 
 MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-MAX_TOOL_ITERATIONS = 8
+MAX_TOOL_ITERATIONS = 16
 DEFAULT_LIMIT = 6
 MAX_SELECTED_TOTAL = 12
 MAX_SETS = 10
