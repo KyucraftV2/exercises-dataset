@@ -9,6 +9,3 @@ __pycache__/
 *.db-journal
 *.db-wal
 *.db-shm
-
-# Claude Code local settings (do not publish)
-.claude/
