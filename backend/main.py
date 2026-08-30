@@ -47,8 +47,12 @@ class IpRateLimitDependency:
         self._message = message
 
     def __call__(self, request: Request) -> None:
-        if not self._limiter.allow(_client_ip(request)):
-            raise HTTPException(status_code=429, detail=self._message)
+        key = _client_ip(request)
+        if not self._limiter.allow(key):
+            retry_after = self._limiter.retry_after_seconds(key)
+            raise HTTPException(
+                status_code=429, detail=self._message, headers={"Retry-After": str(retry_after)}
+            )
 
 
 require_login_rate_limit = IpRateLimitDependency(
@@ -99,6 +103,13 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    if request.url.scheme == "https":
+        # Only meaningful (and only sent) over an actual HTTPS connection -
+        # like Set-Cookie's Secure flag, browsers ignore this header entirely
+        # over plain HTTP, and this app has no reverse-proxy/TLS-terminator
+        # awareness (see _client_ip's comment) to know it's "really" HTTPS
+        # otherwise.
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
 
 
@@ -173,6 +184,14 @@ def get_alternative(exercise_id: str, lang: str = "fr", exclude: str = "") -> di
     if alternative is None:
         raise HTTPException(status_code=404, detail="No alternative exercise found")
     return alternative
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    """Liveness check for a process manager/orchestrator - no auth, no
+    dependency on the dataset or the DB being in any particular state,
+    just confirms the process is up and serving requests."""
+    return {"status": "ok"}
 
 
 @app.get("/api/mode")
@@ -349,7 +368,9 @@ def chat(
 ) -> ChatResponse:
     if not CHAT_RATE_LIMIT.allow(username):
         raise HTTPException(
-            status_code=429, detail="Too many chat requests - please slow down and try again shortly"
+            status_code=429,
+            detail="Too many chat requests - please slow down and try again shortly",
+            headers={"Retry-After": str(CHAT_RATE_LIMIT.retry_after_seconds(username))},
         )
     if req.lang not in s.list_languages():
         raise HTTPException(status_code=400, detail=f"Unsupported lang '{req.lang}'")

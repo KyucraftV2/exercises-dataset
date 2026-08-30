@@ -8,6 +8,7 @@ would need a shared store (e.g. Redis) instead.
 
 import time
 from collections import OrderedDict, deque
+from math import ceil
 from threading import Lock
 
 DEFAULT_MAX_TRACKED_KEYS = 10_000
@@ -49,3 +50,16 @@ class RateLimiter:
                 return False
             hits.append(now)
             return True
+
+    def retry_after_seconds(self, key: str) -> int:
+        """How long (rounded up) until `allow(key)` would next succeed, for
+        a `Retry-After` header. Meant to be called right after `allow`
+        returned False for the same key - assumes the window's oldest hit
+        (the next one to expire) is still the one at the front of the
+        deque."""
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return 0
+            remaining = self.window_seconds - (time.monotonic() - hits[0])
+            return max(0, ceil(remaining))
