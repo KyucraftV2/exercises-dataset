@@ -14,6 +14,16 @@ def test_load_exercises_returns_the_full_real_dataset():
     assert sample["equipment"]  # never empty
 
 
+def test_load_exercises_has_no_duplicate_names():
+    # a name shared by 2+ different exercise ids reads as the same result
+    # appearing twice in search/filter output - if a future dataset
+    # addition introduces one, it should be disambiguated (this dataset's
+    # own convention: append " v. 2", see e.g. "dumbbell arnold press" /
+    # "dumbbell arnold press v. 2") rather than left as an exact duplicate.
+    names = [ex["name"].lower() for ex in data.load_exercises()]
+    assert len(names) == len(set(names))
+
+
 def test_load_schema_describes_the_exercise_shape():
     schema = data.load_schema()
     assert schema["$defs"]["exercise"]["required"]
