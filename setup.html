@@ -741,7 +741,7 @@ const DB_SQL = {
   name              NVARCHAR(255) NOT NULL,
   category          NVARCHAR(100),
   body_part         NVARCHAR(100),
-  equipment         NVARCHAR(100),
+  equipment         NVARCHAR(100),  -- comma-separated if an exercise needs more than one
   instructions_en   NVARCHAR(MAX),
   instructions_es   NVARCHAR(MAX),
   instructions_it   NVARCHAR(MAX),
@@ -763,7 +763,7 @@ const DB_SQL = {
   name              VARCHAR(255) NOT NULL,
   category          VARCHAR(100),
   body_part         VARCHAR(100),
-  equipment         VARCHAR(100),
+  equipment         VARCHAR(100),  -- comma-separated if an exercise needs more than one
   instructions_en   TEXT,
   instructions_es   TEXT,
   instructions_it   TEXT,
@@ -785,7 +785,7 @@ const DB_SQL = {
   name              VARCHAR(255) NOT NULL,
   category          VARCHAR(100),
   body_part         VARCHAR(100),
-  equipment         VARCHAR(100),
+  equipment         VARCHAR(100),  -- comma-separated if an exercise needs more than one
   instructions_en   TEXT,
   instructions_es   TEXT,
   instructions_it   TEXT,
@@ -807,7 +807,7 @@ const DB_SQL = {
   name              TEXT NOT NULL,
   category          TEXT,
   body_part         TEXT,
-  equipment         TEXT,
+  equipment         TEXT,  -- comma-separated if an exercise needs more than one
   instructions_en   TEXT,
   instructions_es   TEXT,
   instructions_it   TEXT,
@@ -1538,7 +1538,7 @@ function buildInserts(exercises, db) {
       escStr(ex.name, db),
       escStr(ex.category, db),
       escStr(ex.body_part, db),
-      escStr(ex.equipment, db),
+      escStr(Array.isArray(ex.equipment) ? ex.equipment.join(', ') : ex.equipment, db),
       escStr(instrEn, db),
       escStr(instrEs, db),
       escStr(instrIt, db),
