@@ -229,6 +229,29 @@ def test_plan_put_rejects_duplicate_exercise_in_same_day(client):
     assert res.status_code == 400
 
 
+def test_plan_put_rejects_unknown_exercise_id(client):
+    register(client)
+    body = _sample_plan_body("not-a-real-exercise-id")
+    res = client.put("/api/plan", json=body, headers=CSRF_HEADERS)
+    assert res.status_code == 400
+
+
+def test_plan_put_rejects_sets_out_of_bounds(client):
+    register(client)
+    body = _sample_plan_body(_real_exercise_id())
+    body["days"][0]["exercises"][0]["sets"] = 999
+    res = client.put("/api/plan", json=body, headers=CSRF_HEADERS)
+    assert res.status_code == 422
+
+
+def test_plan_put_rejects_negative_rest_seconds(client):
+    register(client)
+    body = _sample_plan_body(_real_exercise_id())
+    body["days"][0]["exercises"][0]["rest_seconds"] = -1
+    res = client.put("/api/plan", json=body, headers=CSRF_HEADERS)
+    assert res.status_code == 422
+
+
 def test_mark_exercise_done(client):
     register(client)
     exercise_id = _real_exercise_id()

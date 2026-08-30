@@ -7,11 +7,12 @@ load_dotenv()
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import scripting as s
 
 from . import auth, plans, storage
+from .groq_assistant import MAX_REST_SECONDS, MAX_SETS
 from .ratelimit import RateLimiter
 from .selector import get_mode, get_supported_langs, run_selector
 
@@ -248,9 +249,9 @@ def me(username: str = Depends(get_current_username)) -> dict:
 
 class PlanExerciseIn(BaseModel):
     exercise_id: str
-    sets: int
+    sets: int = Field(ge=1, le=MAX_SETS)
     reps: str
-    rest_seconds: int
+    rest_seconds: int = Field(ge=0, le=MAX_REST_SECONDS)
     done: bool = False
 
 
@@ -300,6 +301,9 @@ def put_my_plan(
         exercise_ids = [item.exercise_id for item in day.exercises]
         if len(exercise_ids) != len(set(exercise_ids)):
             raise HTTPException(status_code=400, detail=f"Duplicate exercise in day '{day.label}'")
+        for exercise_id in exercise_ids:
+            if s.get_exercise_by_id(exercise_id, body.lang) is None:
+                raise HTTPException(status_code=400, detail=f"Unknown exercise_id '{exercise_id}'")
     plans.save_plan(username, body.lang, [d.model_dump() for d in body.days])
     return plans.get_plan(username, body.lang)
 
