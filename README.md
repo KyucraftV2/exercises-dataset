@@ -120,12 +120,14 @@ selection of real exercises from this dataset. Two selection modes, switched wit
 pip install -r backend/requirements.txt
 cp .env.example .env   # AI_MODE=local works out of the box; set AI_MODE=groq + GROQ_API_KEY to use the LLM mode instead
 uvicorn backend.main:app --reload
-# open http://127.0.0.1:8000
+# open http://localhost:8000
 ```
 
 Login/register set a `Secure` session cookie, which normally requires HTTPS — this works over plain
-`http://127.0.0.1` or `http://localhost` because current browsers treat loopback addresses as a
-secure context, but a real deployment must be served over HTTPS or the cookie won't be set/sent.
+`http://localhost` because current browsers treat it as a secure context, but a real deployment must
+be served over HTTPS or the cookie won't be set/sent. Safari specifically does *not* extend that to
+`http://127.0.0.1` (Chrome/Firefox do), so the server redirects any `127.0.0.1` request to `localhost`
+(`redirect_127_to_localhost` in `backend/main.py`) rather than silently 401ing every request after login.
 
 Besides a flat selection, you can ask for a multi-day **program** ("programme sur 3 jours avec
 haltères", "4 day program"): both modes return exercises grouped into days with suggested
