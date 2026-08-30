@@ -183,7 +183,7 @@ function fillCardBody(body, exercise, meta) {
 
   const tags = document.createElement("p");
   tags.className = "tags";
-  tags.textContent = `${exercise.equipment} · ${exercise.category} · ${exercise.target}`;
+  tags.textContent = `${exercise.equipment.join(" + ")} · ${exercise.category} · ${exercise.target}`;
   info.appendChild(tags);
 
   if (meta) {
@@ -607,7 +607,7 @@ function fillModal(exercise) {
   document.getElementById("modal-img").alt = exercise.name;
   document.getElementById("modal-name").textContent = exercise.name;
   document.getElementById("modal-tags").textContent =
-    `${exercise.equipment} · ${exercise.category} · ${exercise.target}`;
+    `${exercise.equipment.join(" + ")} · ${exercise.category} · ${exercise.target}`;
   renderSteps(exercise);
 }
 

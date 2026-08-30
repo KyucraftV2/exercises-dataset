@@ -2,7 +2,7 @@ import random
 
 
 def filter_by_equipment(exercises: list[dict], equipment: list[str]) -> list[dict]:
-    return [ex for ex in exercises if ex["equipment"] in equipment]
+    return [ex for ex in exercises if set(ex["equipment"]) & set(equipment)]
 
 
 def filter_by_muscle_group(exercises: list[dict], muscle_group: list[str]) -> list[dict]:
@@ -51,7 +51,7 @@ def find_alternative(exercises: list[dict], exercise: dict, exclude_ids: set[str
     exists in any tier."""
     exclude_ids = exclude_ids | {exercise["id"]}
     tiers = (
-        filter_exercises(exercises, category=[exercise["category"]], equipment=[exercise["equipment"]]),
+        filter_exercises(exercises, category=[exercise["category"]], equipment=exercise["equipment"]),
         filter_exercises(exercises, category=[exercise["category"]]),
         filter_exercises(exercises, target=[exercise["target"]]),
     )

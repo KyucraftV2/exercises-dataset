@@ -46,7 +46,8 @@ def _unique_values(field: str) -> list[str]:
 
 
 def list_equipment() -> list[str]:
-    return _unique_values("equipment")
+    values = {tag for exercise in load_exercises() for tag in exercise["equipment"]}
+    return sorted(values)
 
 
 def list_categories() -> list[str]:
