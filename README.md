@@ -123,11 +123,13 @@ uvicorn backend.main:app --reload
 # open http://localhost:8000
 ```
 
-Login/register set a `Secure` session cookie, which normally requires HTTPS — this works over plain
-`http://localhost` because current browsers treat it as a secure context, but a real deployment must
-be served over HTTPS or the cookie won't be set/sent. Safari specifically does *not* extend that to
-`http://127.0.0.1` (Chrome/Firefox do), so the server redirects any `127.0.0.1` request to `localhost`
-(`redirect_127_to_localhost` in `backend/main.py`) rather than silently 401ing every request after login.
+Login/register set a session cookie marked `Secure` only when the request is actually served over
+HTTPS (a real deployment must use HTTPS to get that protection). Plain `http://localhost` dev omits
+the flag instead, because Safari — unlike Chrome/Firefox — silently drops a `Secure` cookie over
+plain HTTP even on localhost; gating on the real scheme keeps the session working there rather than
+having it 401 every request after login. Safari also doesn't treat `http://127.0.0.1` itself as
+equivalent to `localhost`, so the server separately redirects any `127.0.0.1` request to `localhost`
+(`redirect_127_to_localhost` in `backend/main.py`).
 
 Besides a flat selection, you can ask for a multi-day **program** ("programme sur 3 jours avec
 haltères", "4 day program"): both modes return exercises grouped into days with suggested
