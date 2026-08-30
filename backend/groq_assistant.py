@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 
 from groq import Groq, GroqError
 
@@ -18,13 +19,29 @@ DEFAULT_SETS = 3
 DEFAULT_REPS = "8-12"
 DEFAULT_REST_SECONDS = 90
 
+# Per-request wall-clock budget for the whole tool-calling loop, and a
+# per-HTTP-call timeout passed to the Groq client. Without these, a
+# rate-limited account (the SDK retries 429s with a backoff that can reach
+# tens of seconds per call - observed in practice) can turn a single
+# /api/chat call into a multi-minute hang across MAX_TOOL_ITERATIONS
+# iterations, with no way for the caller to know it's still alive.
+#
+# This is a best-effort budget, not a hard deadline: it's only checked
+# between iterations, so one iteration whose own retry+backoff overruns it
+# still completes before the check can bail out on the *next* one. It
+# still turns "up to MAX_TOOL_ITERATIONS slow iterations stacked back to
+# back" into "roughly one slow iteration" in the worst case, which is the
+# actual failure mode this fixes.
+REQUEST_TIME_BUDGET_SECONDS = 45.0
+PER_CALL_TIMEOUT_SECONDS = 20.0
+
 _client: Groq | None = None
 
 
 def _client_instance() -> Groq:
     global _client
     if _client is None:
-        _client = Groq()
+        _client = Groq(timeout=PER_CALL_TIMEOUT_SECONDS, max_retries=1)
     return _client
 
 
@@ -252,8 +269,13 @@ def run_assistant(message: str, history: list[dict], lang: str) -> dict:
         "program": None,
     }
 
+    start_time = time.monotonic()
+
     try:
         for _ in range(MAX_TOOL_ITERATIONS):
+            if time.monotonic() - start_time > REQUEST_TIME_BUDGET_SECONDS:
+                logger.warning("Groq chat completion exceeded its time budget, degrading to fallback")
+                break
             response = client.chat.completions.create(
                 model=MODEL,
                 max_tokens=1536,

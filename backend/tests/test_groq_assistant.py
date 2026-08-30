@@ -120,6 +120,57 @@ def test_malformed_tool_call_arguments_get_an_error_reply_not_a_crash(monkeypatc
     assert result["message"] == "Réponse finale."
 
 
+def test_exhausting_max_tool_iterations_without_submit_program_degrades_to_fallback(monkeypatch):
+    # A client that just keeps searching (filter_exercises) and never calls
+    # submit_program or replies with plain text - e.g. a multi-day program
+    # request needing more searches than the loop budget allows.
+    call_count = 0
+
+    def create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _FakeResponse(
+            _FakeMessage(
+                tool_calls=[_FakeToolCall(f"call_{call_count}", "filter_exercises", "{}")]
+            )
+        )
+
+    monkeypatch.setattr(groq_assistant, "_client_instance", lambda: _fake_client(create))
+
+    result = groq_assistant.run_assistant("programme sur 7 jours", [], "fr")
+
+    assert call_count == groq_assistant.MAX_TOOL_ITERATIONS
+    assert result["message"] == groq_assistant.FALLBACK_MESSAGES["fr"]
+    assert result["program"] is None
+
+
+def test_time_budget_stops_the_loop_before_max_iterations(monkeypatch):
+    # Simulate a slow/rate-limited account: the clock jumps past the whole
+    # time budget between the 1st and 2nd iteration, so the loop should
+    # bail out long before MAX_TOOL_ITERATIONS is reached.
+    call_count = 0
+    fake_now = [0.0]
+
+    def fake_monotonic():
+        return fake_now[0]
+
+    def create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        fake_now[0] += groq_assistant.REQUEST_TIME_BUDGET_SECONDS + 1
+        return _FakeResponse(
+            _FakeMessage(tool_calls=[_FakeToolCall(f"call_{call_count}", "filter_exercises", "{}")])
+        )
+
+    monkeypatch.setattr(groq_assistant, "_client_instance", lambda: _fake_client(create))
+    monkeypatch.setattr(groq_assistant.time, "monotonic", fake_monotonic)
+
+    result = groq_assistant.run_assistant("programme sur 7 jours", [], "fr")
+
+    assert call_count == 1  # only the 1st iteration ran before the budget check bailed
+    assert result["message"] == groq_assistant.FALLBACK_MESSAGES["fr"]
+
+
 def test_program_with_truncated_json_degrades_to_fallback(monkeypatch):
     def create(**kwargs):
         return _FakeResponse(

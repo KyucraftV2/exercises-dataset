@@ -3,7 +3,9 @@ const results = document.getElementById("results");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("message");
 const langSelect = document.getElementById("lang");
+const cancelBtn = document.getElementById("chat-cancel");
 const history = [];
+let chatAbortController = null;
 const modeBadge = document.getElementById("mode-badge");
 
 // --- Auth ---------------------------------------------------------
@@ -712,6 +714,8 @@ form.addEventListener("submit", async (e) => {
   const pending = addBubble("assistant pending", "…");
   form.querySelector("button").disabled = true;
   langSelect.disabled = true;
+  chatAbortController = new AbortController();
+  cancelBtn.classList.remove("hidden");
   const requestLang = langSelect.value; // frozen: langSelect may change while this request is in flight
 
   try {
@@ -720,6 +724,7 @@ form.addEventListener("submit", async (e) => {
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", ...CSRF_HEADERS },
       body: JSON.stringify({ message, lang: requestLang, history }),
+      signal: chatAbortController.signal,
     });
     if (res.status === 401) {
       clearAuth();
@@ -744,14 +749,26 @@ form.addEventListener("submit", async (e) => {
     history.push({ role: "assistant", text: data.message });
   } catch (err) {
     // our own throws above (401/429) already carry a user-facing message;
-    // a raw fetch/network failure doesn't, so fall back to a generic one
-    pending.textContent = err instanceof TypeError
-      ? "Erreur : impossible de contacter l'assistant."
-      : err.message;
+    // AbortController.abort() rejects fetch with an AbortError, not a
+    // TypeError, so it needs its own message rather than falling into the
+    // generic network-failure one below
+    if (err instanceof DOMException && err.name === "AbortError") {
+      pending.textContent = "Annulé.";
+    } else {
+      pending.textContent = err instanceof TypeError
+        ? "Erreur : impossible de contacter l'assistant."
+        : err.message;
+    }
     pending.className = "msg assistant";
   } finally {
     form.querySelector("button").disabled = false;
     langSelect.disabled = false;
+    cancelBtn.classList.add("hidden");
+    chatAbortController = null;
     input.focus();
   }
+});
+
+cancelBtn.addEventListener("click", () => {
+  chatAbortController?.abort();
 });
