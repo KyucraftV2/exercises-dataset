@@ -20408,7 +20408,7 @@
   },
   {
     "id": "1371",
-    "name": "barbell seated calf raise",
+    "name": "barbell seated calf raise v. 2",
     "category": "lower legs",
     "body_part": "lower legs",
     "equipment": ["barbell"],
@@ -87195,7 +87195,7 @@
   },
   {
     "id": "1628",
-    "name": "ez barbell spider curl",
+    "name": "ez barbell spider curl v. 2",
     "category": "upper arms",
     "body_part": "upper arms",
     "equipment": ["ez barbell"],
@@ -103028,7 +103028,7 @@
   },
   {
     "id": "0577",
-    "name": "lever chest press",
+    "name": "lever chest press v. 2",
     "category": "chest",
     "body_part": "chest",
     "equipment": ["leverage machine"],
@@ -117261,7 +117261,7 @@
   },
   {
     "id": "0656",
-    "name": "push-up (on stability ball)",
+    "name": "push-up (on stability ball) v. 2",
     "category": "chest",
     "body_part": "chest",
     "equipment": ["stability ball"],
@@ -123581,7 +123581,7 @@
   },
   {
     "id": "1766",
-    "name": "self assisted inverse leg curl",
+    "name": "self assisted inverse leg curl v. 2",
     "category": "upper legs",
     "body_part": "upper legs",
     "equipment": ["body weight"],
@@ -131976,7 +131976,7 @@
   },
   {
     "id": "1394",
-    "name": "smith reverse calf raises",
+    "name": "smith reverse calf raises v. 2",
     "category": "lower legs",
     "body_part": "lower legs",
     "equipment": ["smith machine"],
