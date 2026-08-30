@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 

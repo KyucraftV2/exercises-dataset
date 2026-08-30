@@ -26,7 +26,7 @@ install: venv ## Installe les dépendances runtime
 	$(PIP) install -r backend/requirements.txt
 
 install-dev: venv ## Installe les dépendances de dev (tests + ruff)
-	$(PIP) install -r backend/requirements-dev.txt ruff
+	$(PIP) install -r backend/requirements-dev.txt
 
 .env:
 	cp .env.example .env
