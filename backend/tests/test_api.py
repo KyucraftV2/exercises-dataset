@@ -1,3 +1,6 @@
+from fastapi.testclient import TestClient
+
+from backend import main
 from backend.tests.conftest import CSRF_HEADERS
 
 
@@ -11,6 +14,30 @@ def login(client, username="alice", password="correcthorse"):
     return client.post(
         "/api/auth/login", json={"username": username, "password": password}, headers=CSRF_HEADERS
     )
+
+
+# --- 127.0.0.1 -> localhost redirect ----------------------------------
+#
+# Safari doesn't treat http://127.0.0.1 as a secure context for `Secure`
+# cookies (unlike Chrome/Firefox and unlike http://localhost), so the
+# session cookie set on login/register never actually gets stored there -
+# every later request looks logged-out. See backend/main.py's
+# redirect_127_to_localhost middleware.
+
+
+def test_127_0_0_1_is_redirected_to_localhost_preserving_method_and_path():
+    client_127 = TestClient(main.app, base_url="http://127.0.0.1", follow_redirects=False)
+    res = client_127.post(
+        "/api/auth/login", json={"username": "alice", "password": "x"}, headers=CSRF_HEADERS
+    )
+    assert res.status_code == 307
+    assert res.headers["location"] == "http://localhost/api/auth/login"
+
+
+def test_localhost_is_not_redirected():
+    client_localhost = TestClient(main.app, base_url="http://localhost", follow_redirects=False)
+    res = client_localhost.get("/api/mode")
+    assert res.status_code == 200
 
 
 # --- auth flow -------------------------------------------------------

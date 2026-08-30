@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -75,6 +76,18 @@ _CSP = (
     "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
     "frame-ancestors 'none'; form-action 'self'"
 )
+
+
+@app.middleware("http")
+async def redirect_127_to_localhost(request: Request, call_next):
+    # Safari (unlike Chrome/Firefox) doesn't treat http://127.0.0.1 as a
+    # secure context for `Secure` cookies, so the session cookie set on
+    # login/register silently never gets stored there - every subsequent
+    # request (auth/me, chat...) then looks logged-out and 401s. It does
+    # treat http://localhost that way, so bounce 127.0.0.1 traffic there.
+    if request.url.hostname == "127.0.0.1":
+        return RedirectResponse(url=str(request.url.replace(hostname="localhost")))
+    return await call_next(request)
 
 
 @app.middleware("http")
