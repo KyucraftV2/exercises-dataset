@@ -13,8 +13,9 @@ from backend import storage
 # `main` next never touches real state.
 storage.DB_PATH = Path(tempfile.mkdtemp()) / "conftest-import.db"
 
-from backend import main  # noqa: E402 (must come after the DB_PATH redirect above)
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
+
+from backend import main
 
 CSRF_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
