@@ -43,6 +43,18 @@ def test_localhost_is_not_redirected():
 # --- auth flow -------------------------------------------------------
 
 
+def test_session_cookie_omits_secure_flag_over_plain_http():
+    # Safari, unlike Chrome/Firefox, silently drops a `Secure` cookie set
+    # over plain HTTP even on localhost - the session would never round
+    # trip and every later request would look logged-out (401). Chrome and
+    # Firefox store it either way, so leaving the flag off costs nothing
+    # for a real (HTTPS) deployment while fixing Safari in local dev.
+    client_http = TestClient(main.app, base_url="http://localhost")
+    res = register(client_http)
+    assert res.status_code == 200
+    assert "Secure" not in res.headers["set-cookie"]
+
+
 def test_register_sets_httponly_session_cookie(client):
     res = register(client)
     assert res.status_code == 200

@@ -127,12 +127,18 @@ def verify_csrf_header(x_requested_with: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="Missing or invalid CSRF header")
 
 
-def _set_session_cookie(response: Response, token: str) -> None:
+def _set_session_cookie(request: Request, response: Response, token: str) -> None:
+    # WebKit (Safari), unlike Chrome/Firefox, won't store a `Secure` cookie
+    # over plain HTTP even on localhost - it silently drops it, so the
+    # session never round-trips and every later request 401s. Chrome/Firefox
+    # treat localhost as a secure context and store it either way, so
+    # gating on the actual scheme costs nothing there while fixing Safari.
+    # Mirrors the same scheme check already used for the HSTS header below.
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
-        secure=True,
+        secure=request.url.scheme == "https",
         samesite="strict",
         max_age=int(storage.SESSION_TTL.total_seconds()),
         path="/",
@@ -211,6 +217,7 @@ class AuthResponse(BaseModel):
 @app.post("/api/auth/register", response_model=AuthResponse)
 def register(
     req: AuthRequest,
+    request: Request,
     response: Response,
     _rate: None = Depends(require_register_rate_limit),
     _csrf: None = Depends(verify_csrf_header),
@@ -231,13 +238,14 @@ def register(
         token = storage.create_user(req.username, req.password)
     except storage.UsernameTaken:
         raise HTTPException(status_code=409, detail="Username already taken")
-    _set_session_cookie(response, token)
+    _set_session_cookie(request, response, token)
     return AuthResponse(username=req.username)
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
 def login(
     req: AuthRequest,
+    request: Request,
     response: Response,
     _rate: None = Depends(require_login_rate_limit),
     _csrf: None = Depends(verify_csrf_header),
@@ -245,7 +253,7 @@ def login(
     token = storage.login(req.username, req.password)
     if token is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    _set_session_cookie(response, token)
+    _set_session_cookie(request, response, token)
     return AuthResponse(username=req.username)
 
 
