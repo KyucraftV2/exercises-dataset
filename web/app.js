@@ -447,6 +447,14 @@ updateAuthUI();
 // (no-API) mode only understands a couple of languages even though the
 // dataset itself has instructions in ten - offering the rest would let
 // the user pick a language that silently never matches anything.
+// Keeps <html lang> in sync with the chat language so screen readers use
+// the right pronunciation/voice for whichever language is actually
+// selected, instead of the page's static initial "fr".
+function syncDocumentLang() {
+  if (langSelect.value) document.documentElement.lang = langSelect.value;
+}
+langSelect.addEventListener("change", syncDocumentLang);
+
 (async function loadModeAndLanguages() {
   try {
     const res = await fetch("/api/mode");
@@ -468,6 +476,7 @@ updateAuthUI();
     modeBadge.textContent = "";
     langSelect.innerHTML = '<option value="fr" selected>FR</option>';
   }
+  syncDocumentLang();
 })();
 
 const programEl = document.getElementById("program");
