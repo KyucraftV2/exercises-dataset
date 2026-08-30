@@ -45,3 +45,18 @@ def test_touching_a_key_protects_it_from_eviction():
     limiter.allow("c")  # exceeds cap -> evicts "b", not "a"
 
     assert set(limiter._hits.keys()) == {"a", "c"}
+
+
+def test_retry_after_seconds_counts_down_to_the_oldest_hit_expiring(monkeypatch):
+    limiter = RateLimiter(max_requests=1, window_seconds=10)
+    times = iter([100.0, 104.0, 104.0])
+    monkeypatch.setattr("backend.ratelimit.time.monotonic", lambda: next(times))
+
+    assert limiter.allow("a") is True  # t=100, consumes the only slot
+    assert limiter.allow("a") is False  # t=104, still within the window
+    assert limiter.retry_after_seconds("a") == 6  # t=104, oldest hit expires at t=110
+
+
+def test_retry_after_seconds_is_zero_for_a_key_with_no_hits():
+    limiter = RateLimiter(max_requests=1, window_seconds=10)
+    assert limiter.retry_after_seconds("never-seen") == 0

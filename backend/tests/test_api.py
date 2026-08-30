@@ -119,6 +119,7 @@ def test_login_is_rate_limited_per_ip(client):
         assert res.status_code == 401
     res = login(client, password="wrongpassword")
     assert res.status_code == 429
+    assert int(res.headers["retry-after"]) > 0
 
 
 def test_register_is_rate_limited_per_ip(client):
@@ -127,6 +128,7 @@ def test_register_is_rate_limited_per_ip(client):
         assert res.status_code == 200
     res = register(client, username="user_over_limit", password="correcthorse")
     assert res.status_code == 429
+    assert int(res.headers["retry-after"]) > 0
 
 
 # --- chat ---------------------------------------------------------------
@@ -167,6 +169,16 @@ def test_chat_is_rate_limited_per_user(client):
         "/api/chat", json={"message": "pectoraux", "lang": "fr", "history": []}, headers=CSRF_HEADERS
     )
     assert res.status_code == 429
+    assert int(res.headers["retry-after"]) > 0
+
+
+# --- misc -----------------------------------------------------------------
+
+
+def test_healthz_is_public_and_ok(client):
+    res = client.get("/healthz")
+    assert res.status_code == 200
+    assert res.json() == {"status": "ok"}
 
 
 # --- plan CRUD ------------------------------------------------------------
